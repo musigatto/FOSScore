@@ -66,7 +66,8 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
     }
 
     DisposableEffect(renderer) {
-        onDispose { renderer?.close() }
+        val current = renderer
+        onDispose { current?.close() }
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -83,8 +84,13 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
                     .pointerInput(Unit) {
                         detectTransformGestures { _, pan, zoom, _ ->
                             scale = (scale * zoom).coerceIn(1f, 5f)
-                            offsetX += pan.x
-                            offsetY += pan.y
+                            if (scale > 1f) {
+                                offsetX += pan.x
+                                offsetY += pan.y
+                            } else {
+                                offsetX = 0f
+                                offsetY = 0f
+                            }
                         }
                     }
             )
