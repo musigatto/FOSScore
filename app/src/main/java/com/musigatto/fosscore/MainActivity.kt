@@ -19,6 +19,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,13 +33,14 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         setContent {
             FOSScoreTheme {
-                var pdfUri by remember { mutableStateOf<Uri?>(null) }
+                var pdfUri by rememberSaveable { mutableStateOf<Uri?>(null) }
                 val picker = rememberLauncherForActivityResult(
                     ActivityResultContracts.OpenDocument()
                 ) { pdfUri = it }
 
-                if (pdfUri != null) {
-                    PdfViewerScreen(pdfUri = pdfUri!!, onBack = { pdfUri = null })
+                val uri = pdfUri
+                if (uri != null) {
+                    PdfViewerScreen(pdfUri = uri, onBack = { pdfUri = null })
                 } else {
                     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                         Column(
