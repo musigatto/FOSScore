@@ -93,7 +93,8 @@ private fun FOSScoreNav(
             pdfUri = Uri.fromFile(File(s.sheet.path)),
             onBack = { screen = Screen.Library },
             themeMode = themeMode,
-            onToggleTheme = toggleTheme
+            onToggleTheme = toggleTheme,
+            sheetHash = s.sheet.hash
         )
 
         is Screen.Library -> Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->

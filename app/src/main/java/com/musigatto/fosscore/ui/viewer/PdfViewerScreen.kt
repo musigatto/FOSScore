@@ -11,17 +11,22 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -31,11 +36,14 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -55,12 +63,18 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.musigatto.fosscore.FOSScoreApp
+import com.musigatto.fosscore.library.Stamp
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 // ponytail: rendering ceiling on the longest side (px). Cuts memory ~10x for big scan pages;
@@ -101,7 +115,8 @@ fun PdfViewerScreen(
     pdfUri: Uri,
     onBack: () -> Unit,
     themeMode: ThemeMode,
-    onToggleTheme: () -> Unit
+    onToggleTheme: () -> Unit,
+    sheetHash: String? = null
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -127,6 +142,18 @@ fun PdfViewerScreen(
     var showDim by rememberSaveable { mutableStateOf(false) }
     var invert by remember { mutableStateOf(Settings.invert(context)) }
 
+    val stampsFlow = remember(sheetHash) {
+        sheetHash?.let { (context.applicationContext as FOSScoreApp).stampRepository.observe(it) }
+            ?: flowOf(emptyList())
+    }
+    val stamps by stampsFlow.collectAsState(initial = emptyList())
+    val stampRepo = (context.applicationContext as FOSScoreApp).stampRepository
+
+    var editing by rememberSaveable { mutableStateOf(false) }
+    var activeSymbol by rememberSaveable { mutableStateOf<StampSymbol?>(null) }
+    var dragStamp by remember { mutableStateOf<Stamp?>(null) }
+    val editScope = rememberCoroutineScope()
+
     val swipeThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
 
     // access-order LRU, fresh per document
@@ -138,6 +165,25 @@ fun PdfViewerScreen(
     }
 
     val branch = PageFlow(currentPage, halfTurned, halfEnabled, twoUp, isLandscape, pageCount)
+
+    val canEdit = sheetHash != null && !branch.showTwoUp && !(branch.showHalf && halfTurned)
+
+    // geometría y sellos de la página actual, compartidos entre overlay y gestos
+    // (ponytail: fitRect es barato, no se memoiza; el overlay de sellos solo vive en página única)
+    val currentBmp = bitmaps[currentPage]
+    val pageStamps = if (sheetHash != null) stamps.filter { it.page == currentPage } else emptyList()
+    val pageFit = if (currentBmp != null) {
+        fitRect(
+            viewport.width.toFloat(),
+            viewport.height.toFloat(),
+            currentBmp.width.toFloat() / currentBmp.height.toFloat()
+        )
+    } else RectPx(0f, 0f, 0f, 0f)
+    val currentEditing by rememberUpdatedState(editing)
+    val currentCanEdit by rememberUpdatedState(canEdit)
+    val currentActiveSymbol by rememberUpdatedState(activeSymbol)
+    val currentPageStamps by rememberUpdatedState(pageStamps)
+    val currentPageFit by rememberUpdatedState(pageFit)
 
     val applyNext: () -> Unit = {
         val f = branch.next()
@@ -253,28 +299,92 @@ fun PdfViewerScreen(
                         var anchorDist = 0f
                         var totalPan = Offset.Zero
                         var isTransform = false
+                        var movingStamp: Stamp? = null
+                        var resizeAnchor = 0f
+                        var resizeBase = 0f
+                        if (currentEditing && currentCanEdit) {
+                            hitStamp(down.position, currentPageStamps, currentPageFit)?.let { hit ->
+                                movingStamp = hit
+                                activeSymbol = runCatching { StampSymbol.valueOf(hit.symbol) }.getOrNull()
+                                dragStamp = hit
+                            }
+                        }
 
                         while (true) {
                             val event = awaitPointerEvent()
                             val pressed = event.changes.filter { it.pressed }
                             if (pressed.isEmpty()) {
-                                if (!isTransform) {
-                                    val isSwipe = scale <= 1f &&
-                                        totalPan.getDistance() > swipeThresholdPx &&
-                                        abs(totalPan.x) > abs(totalPan.y)
-                                    if (isSwipe) {
-                                        if (totalPan.x < 0f) applyNext() else applyPrev()
+                                if (movingStamp != null) {
+                                    val done = movingStamp
+                                    movingStamp = null
+                                    dragStamp = null
+                                    if (done != null) editScope.launch { stampRepo.update(done) }
+                                } else if (!isTransform) {
+                                    if (currentEditing && currentCanEdit) {
+                                        // tap en modo editar: coloca el sello activo en el punto tocado
+                                        val sym = currentActiveSymbol
+                                        if (sym != null && sheetHash != null && scale <= 1f) {
+                                            val pos = pxToNormalized(down.position, currentPageFit)
+                                            editScope.launch {
+                                                stampRepo.insert(
+                                                    Stamp(
+                                                        sheetHash = sheetHash,
+                                                        page = currentPage,
+                                                        symbol = sym.name,
+                                                        x = pos.x.coerceIn(0f, 1f),
+                                                        y = pos.y.coerceIn(0f, 1f),
+                                                        size = DEFAULT_STAMP_SIZE
+                                                    )
+                                                )
+                                            }
+                                        }
                                     } else {
-                                        // tap zones (forScore-style): left third prev, right third next, center toggles nav
-                                        val width = viewport.width
-                                        when {
-                                            width > 0 && down.position.x > width * 2f / 3f -> applyNext()
-                                            width > 0 && down.position.x < width / 3f -> applyPrev()
-                                            else -> navVisible = !navVisible
+                                        val isSwipe = scale <= 1f &&
+                                            totalPan.getDistance() > swipeThresholdPx &&
+                                            abs(totalPan.x) > abs(totalPan.y)
+                                        if (isSwipe) {
+                                            if (totalPan.x < 0f) applyNext() else applyPrev()
+                                        } else {
+                                            // tap zones (forScore-style): left third prev, right third next, center toggles nav
+                                            val width = viewport.width
+                                            when {
+                                                width > 0 && down.position.x > width * 2f / 3f -> applyNext()
+                                                width > 0 && down.position.x < width / 3f -> applyPrev()
+                                                else -> navVisible = !navVisible
+                                            }
                                         }
                                     }
                                 }
                                 break
+                            }
+
+                            if (movingStamp != null) {
+                                // mover con 1 dedo; pinch (2do dedo) redimensiona el sello, no la página
+                                if (pressed.size > 1) {
+                                    val d = (pressed[0].position - pressed[1].position).getDistance()
+                                    if (resizeAnchor == 0f) {
+                                        resizeAnchor = d
+                                        resizeBase = movingStamp.size
+                                    } else if (d > 0f) {
+                                        val ns = movingStamp!!.copy(
+                                            size = (resizeBase * d / resizeAnchor).coerceIn(MIN_STAMP_SIZE, MAX_STAMP_SIZE)
+                                        )
+                                        movingStamp = ns
+                                        dragStamp = ns
+                                    }
+                                } else {
+                                    val m = pxToNormalized(centroid(pressed), currentPageFit) -
+                                        pxToNormalized(prevCentroid, currentPageFit)
+                                    val ns = movingStamp!!.copy(
+                                        x = (movingStamp!!.x + m.x).coerceIn(0f, 1f),
+                                        y = (movingStamp!!.y + m.y).coerceIn(0f, 1f)
+                                    )
+                                    movingStamp = ns
+                                    dragStamp = ns
+                                }
+                                prevCentroid = centroid(pressed)
+                                event.changes.forEach { change -> if (change.positionChanged()) change.consume() }
+                                continue
                             }
 
                             val nids = pressed.map { it.id }.toSet()
@@ -361,13 +471,32 @@ fun PdfViewerScreen(
                 }
                 else -> {
                     bitmaps[currentPage]?.let { bmp ->
-                        Image(
-                            bitmap = bmp.asImageBitmap(),
-                            contentDescription = "Page ${currentPage + 1} of $pageCount",
-                            contentScale = ContentScale.Fit,
-                            colorFilter = if (invert) INVERT_FILTER else null,
-                            modifier = zoomMod
-                        )
+                        Box(modifier = zoomMod) {
+                                Image(
+                                    bitmap = bmp.asImageBitmap(),
+                                    contentDescription = "Page ${currentPage + 1} of $pageCount",
+                                    contentScale = ContentScale.Fit,
+                                    colorFilter = if (invert) INVERT_FILTER else null,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                if (canEdit) {
+                                    val density = LocalDensity.current
+                                    for (stamp in pageStamps) {
+                                        val shown = dragStamp?.takeIf { it.id == stamp.id } ?: stamp
+                                        val sym = runCatching { StampSymbol.valueOf(shown.symbol) }.getOrNull()
+                                            ?: continue
+                                        val r = stampRect(shown, pageFit)
+                                        StampView(
+                                            symbol = sym,
+                                            sizePx = r.width,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier
+                                                .offset { IntOffset(r.left.roundToInt(), r.top.roundToInt()) }
+                                                .size(with(density) { r.width.toDp() })
+                                        )
+                                    }
+                                }
+                            }
                     } ?: CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
                 }
             }
@@ -402,6 +531,7 @@ fun PdfViewerScreen(
                         halfEnabled = !halfEnabled
                         halfTurned = false
                     },
+                    enabled = !editing,
                     colors = if (halfEnabled) ButtonDefaults.buttonColors()
                     else ButtonDefaults.outlinedButtonColors()
                 ) { Text("½") }
@@ -409,12 +539,14 @@ fun PdfViewerScreen(
                     Spacer(Modifier.width(4.dp))
                     Button(
                         onClick = { twoUp = false },
+                        enabled = !editing,
                         colors = if (!twoUp) ButtonDefaults.buttonColors()
                         else ButtonDefaults.outlinedButtonColors()
                     ) { Text("1") }
                     Spacer(Modifier.width(4.dp))
                     Button(
                         onClick = { twoUp = true },
+                        enabled = !editing,
                         colors = if (twoUp) ButtonDefaults.buttonColors()
                         else ButtonDefaults.outlinedButtonColors()
                     ) { Text("2") }
@@ -430,6 +562,20 @@ fun PdfViewerScreen(
                     colors = if (invert) ButtonDefaults.buttonColors()
                     else ButtonDefaults.outlinedButtonColors()
                 ) { Text("Neg") }
+                Spacer(Modifier.width(4.dp))
+                Button(
+                    onClick = {
+                        editing = !editing
+                        if (editing) {
+                            twoUp = false
+                            halfEnabled = false
+                            halfTurned = false
+                        }
+                    },
+                    enabled = canEdit,
+                    colors = if (editing) ButtonDefaults.buttonColors()
+                    else ButtonDefaults.outlinedButtonColors()
+                ) { Text("Editar") }
             }
 
             Column(
@@ -456,6 +602,25 @@ fun PdfViewerScreen(
                                 .padding(horizontal = 12.dp)
                         )
                         Text("${dimPct.toInt()}%", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                if (editing && canEdit) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        StampSymbol.entries.forEach { sym ->
+                            StampPaletteButton(
+                                symbol = sym,
+                                selected = sym == activeSymbol,
+                                onClick = { activeSymbol = sym }
+                            )
+                            Spacer(Modifier.width(4.dp))
+                        }
                     }
                 }
                 Row(

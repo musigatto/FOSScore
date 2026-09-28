@@ -16,6 +16,7 @@ sealed class ImportResult {
 class LibraryRepository(context: Context) {
     private val appContext = context.applicationContext
     private val dao = AppDatabase.get(context).sheetDao()
+    private val stampDao = AppDatabase.get(context).stampDao()
 
     fun sheets(): Flow<List<Sheet>> = dao.observeAll()
 
@@ -58,6 +59,7 @@ class LibraryRepository(context: Context) {
 
     suspend fun delete(sheet: Sheet) {
         dao.delete(sheet)
+        stampDao.deleteForSheet(sheet.hash)
         try {
             File(sheet.path).delete()
         } catch (_: Exception) {
