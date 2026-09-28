@@ -1,3 +1,6 @@
 ﻿AGENTS.md
 forscore_features.md
 /build
+.gradle/
+.idea/
+local.properties

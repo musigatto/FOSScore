@@ -26,6 +26,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -40,6 +41,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
@@ -64,6 +68,16 @@ import kotlinx.coroutines.withContext
 private const val MAX_RENDER_DIM = 3200
 private const val MAX_CACHED_PAGES = 4
 
+// inverts page colors (white bg -> black, ink -> white) for OLED dark mode; applied as a
+// draw-time colorFilter so the render cache is untouched.
+private val INVERT_MATRIX = floatArrayOf(
+    -1f, 0f, 0f, 0f, 255f,
+    0f, -1f, 0f, 0f, 255f,
+    0f, 0f, -1f, 0f, 255f,
+    0f, 0f, 0f, 1f, 0f
+)
+private val INVERT_FILTER = ColorFilter.colorMatrix(ColorMatrix(INVERT_MATRIX))
+
 private fun renderPage(r: PdfRenderer, idx: Int): Bitmap {
     val page = r.openPage(idx)
     try {
@@ -83,14 +97,21 @@ private fun centroid(changes: List<PointerInputChange>): Offset =
     changes.fold(Offset.Zero) { acc, c -> acc + c.position } / changes.size.toFloat()
 
 @Composable
-fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
+fun PdfViewerScreen(
+    pdfUri: Uri,
+    onBack: () -> Unit,
+    themeMode: ThemeMode,
+    onToggleTheme: () -> Unit
+) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var renderer by remember { mutableStateOf<PdfRenderer?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
-    var currentPage by rememberSaveable { mutableIntStateOf(0) }
+    var currentPage by rememberSaveable(pdfUri) {
+        mutableIntStateOf(Settings.lastPage(context, pdfUri.toString()))
+    }
     var twoUp by rememberSaveable { mutableStateOf(isLandscape) }
     var halfEnabled by rememberSaveable { mutableStateOf(false) }
     var halfTurned by rememberSaveable { mutableStateOf(false) }
@@ -102,6 +123,9 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
     var offsetY by remember { mutableFloatStateOf(0f) }
     var renderGeneration by remember { mutableIntStateOf(0) }
     var viewport by remember { mutableStateOf(IntSize.Zero) }
+    var dimPct by remember { mutableStateOf(Settings.dimPct(context)) }
+    var showDim by rememberSaveable { mutableStateOf(false) }
+    var invert by remember { mutableStateOf(Settings.invert(context)) }
 
     val swipeThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
 
@@ -136,6 +160,10 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
 
     BackHandler(onBack = onBack)
 
+    LaunchedEffect(currentPage) {
+        Settings.setLastPage(context, pdfUri.toString(), currentPage)
+    }
+
     // ponytail: Android PdfRenderer (zero deps). Swap to MuPDF for annotations/reflow.
     LaunchedEffect(pdfUri) {
         try {
@@ -145,6 +173,7 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
             } else {
                 val r = PdfRenderer(fd)
                 pageCount = r.pageCount
+                currentPage = currentPage.coerceIn(0, r.pageCount - 1)
                 renderer = r
             }
         } catch (e: Exception) {
@@ -287,6 +316,7 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
                                 bitmap = bmp.asImageBitmap(),
                                 contentDescription = null,
                                 contentScale = ContentScale.Fit,
+                                colorFilter = if (invert) INVERT_FILTER else null,
                                 modifier = Modifier.weight(1f).fillMaxHeight()
                             )
                         }
@@ -295,6 +325,7 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
                                 bitmap = bmp.asImageBitmap(),
                                 contentDescription = null,
                                 contentScale = ContentScale.Fit,
+                                colorFilter = if (invert) INVERT_FILTER else null,
                                 modifier = Modifier.weight(1f).fillMaxHeight()
                             )
                         }
@@ -324,6 +355,7 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
                         bitmap = combined.asImageBitmap(),
                         contentDescription = null,
                         contentScale = ContentScale.Fit,
+                        colorFilter = if (invert) INVERT_FILTER else null,
                         modifier = zoomMod
                     )
                 }
@@ -333,6 +365,7 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
                             bitmap = bmp.asImageBitmap(),
                             contentDescription = "Page ${currentPage + 1} of $pageCount",
                             contentScale = ContentScale.Fit,
+                            colorFilter = if (invert) INVERT_FILTER else null,
                             modifier = zoomMod
                         )
                     } ?: CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
@@ -340,6 +373,14 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
             }
         } else {
             CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
+        }
+
+        if (dimPct > 0f) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = dimPct / 100f))
+            )
         }
 
         if (navVisible) {
@@ -378,33 +419,75 @@ fun PdfViewerScreen(pdfUri: Uri, onBack: () -> Unit) {
                         else ButtonDefaults.outlinedButtonColors()
                     ) { Text("2") }
                 }
+                Spacer(Modifier.width(16.dp))
+                Button(onClick = onToggleTheme) { Text(themeMode.label) }
+                Spacer(Modifier.width(4.dp))
+                Button(
+                    onClick = {
+                        invert = !invert
+                        Settings.setInvert(context, invert)
+                    },
+                    colors = if (invert) ButtonDefaults.buttonColors()
+                    else ButtonDefaults.outlinedButtonColors()
+                ) { Text("Neg") }
             }
 
-            Row(
+            Column(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .fillMaxWidth()
                     .background(surface)
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.Center
             ) {
-                Button(
-                    onClick = applyPrev,
-                    enabled = branch.canPrev
-                ) { Text("◀") }
-                Spacer(Modifier.width(16.dp))
-                Text(
-                    branch.label,
-                    modifier = Modifier.align(Alignment.CenterVertically),
-                    style = MaterialTheme.typography.bodyLarge
-                )
-                Spacer(Modifier.width(16.dp))
-                Button(onClick = onBack) { Text("✕") }
-                Spacer(Modifier.width(16.dp))
-                Button(
-                    onClick = applyNext,
-                    enabled = branch.canNext
-                ) { Text("▶") }
+                if (showDim) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("Atenuar", style = MaterialTheme.typography.bodyMedium)
+                        Slider(
+                            value = dimPct,
+                            onValueChange = { dimPct = it },
+                            onValueChangeFinished = { Settings.setDimPct(context, dimPct) },
+                            valueRange = 0f..80f,
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(horizontal = 12.dp)
+                        )
+                        Text("${dimPct.toInt()}%", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    Button(
+                        onClick = applyPrev,
+                        enabled = branch.canPrev
+                    ) { Text("◀") }
+                    Spacer(Modifier.width(16.dp))
+                    Text(
+                        branch.label,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    Spacer(Modifier.width(16.dp))
+                    Button(onClick = onBack) { Text("✕") }
+                    Spacer(Modifier.width(16.dp))
+                    Button(
+                        onClick = { showDim = !showDim },
+                        colors = if (showDim) ButtonDefaults.buttonColors()
+                        else ButtonDefaults.outlinedButtonColors()
+                    ) { Text("◐") }
+                    Spacer(Modifier.width(16.dp))
+                    Button(
+                        onClick = applyNext,
+                        enabled = branch.canNext
+                    ) { Text("▶") }
+                }
             }
         }
     }

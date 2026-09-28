@@ -7,6 +7,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -23,16 +24,25 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.musigatto.fosscore.ui.theme.FOSScoreTheme
 import com.musigatto.fosscore.ui.viewer.PdfViewerScreen
+import com.musigatto.fosscore.ui.viewer.Settings
+import com.musigatto.fosscore.ui.viewer.ThemeMode
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            FOSScoreTheme {
+            val context = LocalContext.current
+            var themeMode by remember { mutableStateOf(Settings.themeMode(context)) }
+            val toggleTheme = {
+                themeMode = themeMode.next()
+                Settings.setThemeMode(context, themeMode)
+            }
+            FOSScoreTheme(darkTheme = themeMode.darkTheme(isSystemInDarkTheme())) {
                 var pdfUri by rememberSaveable { mutableStateOf<Uri?>(null) }
                 val picker = rememberLauncherForActivityResult(
                     ActivityResultContracts.OpenDocument()
@@ -40,7 +50,12 @@ class MainActivity : ComponentActivity() {
 
                 val uri = pdfUri
                 if (uri != null) {
-                    PdfViewerScreen(pdfUri = uri, onBack = { pdfUri = null })
+                    PdfViewerScreen(
+                        pdfUri = uri,
+                        onBack = { pdfUri = null },
+                        themeMode = themeMode,
+                        onToggleTheme = toggleTheme
+                    )
                 } else {
                     Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
                         Column(
