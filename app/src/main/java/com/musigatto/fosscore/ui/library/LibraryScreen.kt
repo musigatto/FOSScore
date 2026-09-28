@@ -13,10 +13,14 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -31,6 +35,8 @@ fun LibraryScreen(
     onImport: () -> Unit
 ) {
     val sheets by repository.sheets().collectAsState(initial = emptyList())
+    var query by rememberSaveable { mutableStateOf("") }
+    val visible = filterSheets(sheets, query)
 
     Column(modifier = Modifier.fillMaxSize()) {
         Row(
@@ -44,15 +50,30 @@ fun LibraryScreen(
             Button(onClick = onImport) { Text("Importar") }
         }
 
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            label = { Text("Buscar") },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+        )
+
         if (sheets.isEmpty()) {
             Text(
                 "Aún no hay partituras. Importa una con el botón Importar.",
                 modifier = Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodyLarge
             )
+        } else if (visible.isEmpty()) {
+            Text(
+                "Sin resultados para '$query'",
+                modifier = Modifier.padding(16.dp),
+                style = MaterialTheme.typography.bodyLarge
+            )
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(sheets, key = { it.id }) { sheet ->
+                items(visible, key = { it.id }) { sheet ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
