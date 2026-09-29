@@ -56,6 +56,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -100,10 +101,9 @@ import kotlinx.coroutines.withContext
 // resolución que le pidamos, así que el zoom se ve nítido en vez de "slightly soft".
 private const val LOG_TAG = "FOSScore-PDF"
 
-// El zoom ignora variaciones menores que esto (fracción del scale). Con los dedos quietos el táctil
-// reporta ±1 px y eso llega a un 0,3 % de escala, que al ampliar se traduce en cientos de px de
-// traslación: el "vibra". 0,8 % es imperceptible al pellizcar pero mata ese ruido.
-private const val ZOOM_DEADBAND = 0.008f
+// Ruido del táctil con los dedos quietos: ±1 px sobre ~400 px entre dedos ≈ 0,25 %. Con 0,4 % de
+// zona muerta el zoom no reacciona al ruido (si no, el contenido "respira" y parece que tiembla).
+private const val ZOOM_NOISE_RATIO = 0.004f
 
 // zoom al que salta el doble toque (2.5x: legible sin perder el contexto de la página)
 private const val DOUBLE_TAP_ZOOM = 2.5f
@@ -307,10 +307,14 @@ fun PdfViewerScreen(
 
     fun clampOffsets() {
         if (viewport == IntSize.Zero) return
-        val maxX = viewport.width * (scale - 1f) / 2f
-        val maxY = viewport.height * (scale - 1f) / 2f
-        offsetX = offsetX.coerceIn(-maxX, maxX)
-        offsetY = offsetY.coerceIn(-maxY, maxY)
+        // La capa usa transformOrigin (0,0): la posición neutra es offset 0 y el rango de paneo
+        // es [-(scale-1)*W, 0], ASIMÉTRICO. Con el rango simétrico (el correcto cuando Compose
+        // escalaba desde el centro) el clamp rechazaba la traslación que produce el anclaje del
+        // pellizco: el zoom se iba al centro y el contenido tiraba contra el tope.
+        val maxX = viewport.width * (scale - 1f)
+        val maxY = viewport.height * (scale - 1f)
+        offsetX = offsetX.coerceIn(-maxX, 0f)
+        offsetY = offsetY.coerceIn(-maxY, 0f)
     }
 
     BackHandler(onBack = onBack)
@@ -389,7 +393,7 @@ fun PdfViewerScreen(
             clampOffsets()
             // el clamp nos ha frenado contra el borde: la inercia ahí no aporta nada
             if (offsetX == bx && offsetY == by) break
-            v *= 0.94f
+            v *= 0.965f   // fricción larga: el glide se siente, no se corta a los 200 ms
         }
     }
 
@@ -488,13 +492,19 @@ fun PdfViewerScreen(
             val zoomMod = Modifier
                 .fillMaxSize()
                 .graphicsLayer(
-                    // origen de la transformación en la ESQUINA: por defecto Compose escala la
-                    // capa desde su CENTRO, y entonces la matemática del gesto (que asume origen
-                    // arriba-izquierda) mete una traslación espuria: la página se desliza hasta
-                    // quedar clavada en una esquina y da la sensación de vibración
+                    // Origen arriba-izquierda: así la capa cumple screen = scale*p + offset, que es
+                    // lo que asume la matemática del anclaje del pellizco (ver clampOffsets).
                     transformOrigin = TransformOrigin(0f, 0f),
                     scaleX = scale, scaleY = scale,
-                    translationX = offsetX, translationY = offsetY
+                    translationX = offsetX, translationY = offsetY,
+                    // Sin esto Compose escala la textura con "vecino más cercano" en los
+                    // ampliados grandes y la imagen "cuece" al hacer zoom (el conocido jittery
+                    // scale animations; ver halilibo.com/2024/why-text-gets-jittery-when-scaled-
+                    // on-android). Low = bilineal: suaviza el reescalado de la GPU.
+                    // NO usamos compositingStrategy = Offscreen (el otro remedio del artículo)
+                    // porque rasteriza el contenido y lo escala como imagen: más suave, pero con
+                    // blur justo donde MuPDF nos da la nitidez que buscamos.
+                    filterQuality = FilterQuality.Low
                 )
                 .pointerInput(Unit) {
                     awaitEachGesture {
@@ -504,7 +514,6 @@ fun PdfViewerScreen(
                         flingVel = Offset.Zero   // tocar corta la inercia
                         var ids = setOf(down.id)
                         var prevCentroid = down.position
-                        var baseScale = scale
                         var anchorDist = 0f
                         var totalPan = Offset.Zero
                         var isTransform = false
@@ -927,8 +936,7 @@ fun PdfViewerScreen(
                             val nids = pressed.map { it.id }.toSet()
                             if (nids != ids) {
                                 ids = nids
-                                baseScale = scale
-                                anchorDist = 0f
+                                anchorDist = 0f      // se reancla al cambiar el nº de dedos
                                 prevCentroid = centroid(pressed)
                             }
 
@@ -942,26 +950,27 @@ fun PdfViewerScreen(
                                 if (anchorDist == 0f) {
                                     anchorDist = d
                                 } else if (d > 0f) {
-                                    val raw = (baseScale * d / anchorDist).coerceIn(1f, 5f)
-                                    // ZONA MUERTA: con los dedos quietos el táctil sigue reportando
-                                    // ±1 px; eso se convertía en un cambio de escala continuo y, al
-                                    // estar ampliado, la traslación se amplificaba (cientos de px)
-                                    // -> el "vibra" de no saber dónde colocarse.
-                                    if (abs(raw - scale) > scale * ZOOM_DEADBAND) {
-                                        // movimiento pequeño: lo suavizamos para que sea continuo
-                                        val target = if (abs(raw - scale) < scale * 0.05f) {
-                                            scale + (raw - scale) * 0.5f
-                                        } else raw
-                                        // Escalar SOBRE EL CENTROIDE manteniendo fijo el punto que hay
-                                        // bajo los dedos. Con transformOrigin (0,0) la capa cumple
-                                        // screen = scale*p + offset, luego
-                                        //   offset' = c - (target/scale) * (c - offset)
-                                        val k = target / scale
-                                        offsetX = c.x - (c.x - offsetX) * k
-                                        offsetY = c.y - (c.y - offsetY) * k
-                                        scale = target
+                                    // INCREMENTAL: aplicamos cuánto ha cambiado la distancia entre
+                                    // los dedos en ESTE frame (ratio), no un objetivo absoluto. Con un
+                                    // objetivo absoluto suavizado la escala se queda siempre a
+                                    // medias -> zoom lento y el anclaje se deriva hacia el centro.
+                                    val ratio = d / anchorDist
+                                    anchorDist = d   // el siguiente frame mide contra esta distancia
+                                    // zona muerta contra el ruido del táctil (±1 px, dedos quietos)
+                                    if (abs(ratio - 1f) > ZOOM_NOISE_RATIO) {
+                                        val target = (scale * ratio).coerceIn(1f, 5f)
+                                        if (target != scale) {
+                                            // anclaje: el punto bajo los dedos se queda quieto
+                                            val k = target / scale
+                                            offsetX = c.x - (c.x - offsetX) * k
+                                            offsetY = c.y - (c.y - offsetY) * k
+                                            scale = target
+                                        }
                                     }
                                 }
+                                // y seguimos a los dedos si los dos se mueven juntos
+                                offsetX += delta.x
+                                offsetY += delta.y
                             } else if (scale > 1f && delta.getDistance() > 0f) {
                                 // un solo dedo: pan (el escalado ya lo lleva el caso de arriba)
                                 isTransform = true
