@@ -40,6 +40,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,6 +59,7 @@ import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
 import androidx.compose.ui.graphics.graphicsLayer
@@ -97,6 +99,14 @@ import kotlinx.coroutines.withContext
 // El techo de render (memoria) vive ahora en MuPdfDoc.MAX_RENDER_PIXELS: MuPDF rasteriza a la
 // resolución que le pidamos, así que el zoom se ve nítido en vez de "slightly soft".
 private const val LOG_TAG = "FOSScore-PDF"
+
+// El zoom ignora variaciones menores que esto (fracción del scale). Con los dedos quietos el táctil
+// reporta ±1 px y eso llega a un 0,3 % de escala, que al ampliar se traduce en cientos de px de
+// traslación: el "vibra". 0,8 % es imperceptible al pellizcar pero mata ese ruido.
+private const val ZOOM_DEADBAND = 0.008f
+
+// zoom al que salta el doble toque (2.5x: legible sin perder el contexto de la página)
+private const val DOUBLE_TAP_ZOOM = 2.5f
 
 // estado del gesto "estirar un tirador": qué objeto se escala desde qué esquina
 private sealed interface Resizing {
@@ -153,6 +163,14 @@ fun PdfViewerScreen(
     // SnapshotStateMap: al cambiar un bitmap solo se redibuja quien lee ESA clave. Con un Map
     // normal, cambiar el bitmap invalidaba el Image + el Canvas de tinta + los sellos enteros
     // (eso se-notaba como un tirón al cambiar la nitidez en mitad del pellizco).
+    // hay un dedo/dos dedos en la pantalla ahora mismo
+    var interacting by remember { mutableStateOf(false) }
+    // doble toque: encaje <-> zoom. Se guardan el instante y el punto del toque anterior.
+    var lastTapMs by remember { mutableLongStateOf(0L) }
+    var lastTapPos by remember { mutableStateOf(Offset.Zero) }
+    // velocidad que queda al soltar el dedo (inercia del paneo); se anula al tocar
+    var flingVel by remember { mutableStateOf(Offset.Zero) }
+    val doubleTapSlopPx = with(LocalDensity.current) { 40.dp.toPx() }
     val bitmaps = remember { mutableStateMapOf<Int, Bitmap>() }
     // nivel de nitidez: 1 = tamaño de encaje, 2/3 = re-renderiza más grande al hacer zoom
     var quality by remember { mutableIntStateOf(1) }
@@ -351,14 +369,41 @@ fun PdfViewerScreen(
         quality = 1
     }
 
-    // Nitidez según el zoom: esperamos a que el pellizco se detenga y pedimos un re-render más
-    // grande solo si el nivel AUMENTÓ (al alejar no rebajamos: cambiar el bitmap a mitad de gesto se
-    // percibe como un tirón). Mientras tanto sigue el bitmap anterior: sin parpadeo, solo un salto
-    // de nitidez cuando aterriza.
+    // Inercia del paneo: al soltar, el desplazamiento sigue con fricción hasta que la velocidad
+    // muere o topa con el borde. Sin esto, recorrer una página ampliada a dedo es lentísimo.
+    // ponytail: bucle propio con fricción en vez de Animatable+decay (menos código, mismo efecto).
+    LaunchedEffect(flingVel) {
+        var v = flingVel
+        flingVel = Offset.Zero
+        if (v.getDistance() < 600f) return@LaunchedEffect
+        var px = offsetX
+        var py = offsetY
+        while (v.getDistance() > 20f) {
+            delay(16)
+            px += v.x * 0.016f
+            py += v.y * 0.016f
+            val bx = offsetX
+            val by = offsetY
+            offsetX = px
+            offsetY = py
+            clampOffsets()
+            // el clamp nos ha frenado contra el borde: la inercia ahí no aporta nada
+            if (offsetX == bx && offsetY == by) break
+            v *= 0.94f
+        }
+    }
+
+    // Nitidez según el zoom, pero SOLO cuando el gesto ha terminado. Antes se recalculaba 180 ms
+    // después de que el scale dejase de cambiar: en un pellizco lento hay pausas mayores, así que
+    // se disparaba a mitad de gesto -> render (100 ms) + cambio de bitmap en pleno pellizco = la
+    // vibración que se notaba. Con `interacting` el salto ocurre al soltar los dedos.
     LaunchedEffect(mupdfDoc) {
-        snapshotFlow { scale }.collectLatest { s ->
-            delay(180)
-            val q = ceil(s).toInt().coerceIn(1, 3)
+        snapshotFlow { interacting to scale }.collectLatest { (busy, s) ->
+            if (busy) return@collectLatest
+            delay(220)
+            // como mucho un salto de nitidez por página (q1 -> q2): cada salto cambia el bitmap y
+            // sube ~16 MB de textura, así que dos o tres seguidos se notan como tirones
+            val q = ceil(s).toInt().coerceIn(1, 2)
             if (q > quality) quality = q
         }
     }
@@ -443,6 +488,11 @@ fun PdfViewerScreen(
             val zoomMod = Modifier
                 .fillMaxSize()
                 .graphicsLayer(
+                    // origen de la transformación en la ESQUINA: por defecto Compose escala la
+                    // capa desde su CENTRO, y entonces la matemática del gesto (que asume origen
+                    // arriba-izquierda) mete una traslación espuria: la página se desliza hasta
+                    // quedar clavada en una esquina y da la sensación de vibración
+                    transformOrigin = TransformOrigin(0f, 0f),
                     scaleX = scale, scaleY = scale,
                     translationX = offsetX, translationY = offsetY
                 )
@@ -450,6 +500,8 @@ fun PdfViewerScreen(
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
                         if (down.isConsumed) return@awaitEachGesture
+                        interacting = true
+                        flingVel = Offset.Zero   // tocar corta la inercia
                         var ids = setOf(down.id)
                         var prevCentroid = down.position
                         var baseScale = scale
@@ -468,6 +520,8 @@ fun PdfViewerScreen(
                         var eraserActive = false
                         var eraserPath = mutableListOf<Offset>()
                         var scaleF = 1f   // factor acumulado del tirador (siempre desde startPos)
+                        var panVel = Offset.Zero
+                        var lastPanMs = System.currentTimeMillis()
                         if (currentEditing && currentCanEdit && !currentDrawingTool && !currentEraserTool) {
                             // 1) un tirador del recuadro de selección manda sobre todo lo demás:
                             //    entrar por la esquina estira, entrar por dentro mueve.
@@ -689,7 +743,35 @@ fun PdfViewerScreen(
                                         editScope.launch { stampRepo.update(done) }
                                     }
                                 } else if (!isTransform) {
-                                    if (currentEditing && currentCanEdit) {
+                                    // doble toque: alterna encaje <-> 2.5x en el punto tocado. Es el
+                                    // atajo para volver a ver la página entera (y para meterse en un
+                                    // detalle) sin pelearse con los botones de la barra.
+                                    val nowMs = System.currentTimeMillis()
+                                    val isDoubleTap = nowMs - lastTapMs < 320L &&
+                                        (down.position - lastTapPos).getDistance() < doubleTapSlopPx
+                                    if (isDoubleTap && !currentEditing) {
+                                        if (scale > 1.05f) {
+                                            scale = 1f
+                                            offsetX = 0f
+                                            offsetY = 0f
+                                        } else {
+                                            val k = DOUBLE_TAP_ZOOM / scale
+                                            offsetX = down.position.x -
+                                                (down.position.x - offsetX) * k
+                                            offsetY = down.position.y -
+                                                (down.position.y - offsetY) * k
+                                            scale = DOUBLE_TAP_ZOOM
+                                            clampOffsets()
+                                        }
+                                        lastTapMs = 0L
+                                    } else {
+                                        lastTapMs = nowMs
+                                        lastTapPos = down.position
+                                        flingVel = if (panVel.getDistance() > 600f) panVel else Offset.Zero
+                                    }
+                                    if (isDoubleTap) {
+                                        // ya gestionado arriba: ni coloca sello ni cambia de página
+                                    } else if (currentEditing && currentCanEdit) {
                                         // tap en modo editar: coloca el sello activo en el punto tocado
                                         val sym = currentActiveSymbol
                                         if (sym == null) {
@@ -736,6 +818,7 @@ fun PdfViewerScreen(
                                 }
                                 break
                             }
+                            interacting = false
 
                             if (resizing != null) {
                                 // estirar por un tirador: 1 puntero, escala sobre el centro.
@@ -856,14 +939,39 @@ fun PdfViewerScreen(
                             if (pressed.size > 1) {
                                 isTransform = true
                                 val d = (pressed[0].position - pressed[1].position).getDistance()
-                                if (anchorDist == 0f) anchorDist = d
-                                else if (d > 0f) scale = (baseScale * d / anchorDist).coerceIn(1f, 5f)
-                            }
-
-                            if (scale > 1f && delta.getDistance() > 0f) {
+                                if (anchorDist == 0f) {
+                                    anchorDist = d
+                                } else if (d > 0f) {
+                                    val raw = (baseScale * d / anchorDist).coerceIn(1f, 5f)
+                                    // ZONA MUERTA: con los dedos quietos el táctil sigue reportando
+                                    // ±1 px; eso se convertía en un cambio de escala continuo y, al
+                                    // estar ampliado, la traslación se amplificaba (cientos de px)
+                                    // -> el "vibra" de no saber dónde colocarse.
+                                    if (abs(raw - scale) > scale * ZOOM_DEADBAND) {
+                                        // movimiento pequeño: lo suavizamos para que sea continuo
+                                        val target = if (abs(raw - scale) < scale * 0.05f) {
+                                            scale + (raw - scale) * 0.5f
+                                        } else raw
+                                        // Escalar SOBRE EL CENTROIDE manteniendo fijo el punto que hay
+                                        // bajo los dedos. Con transformOrigin (0,0) la capa cumple
+                                        // screen = scale*p + offset, luego
+                                        //   offset' = c - (target/scale) * (c - offset)
+                                        val k = target / scale
+                                        offsetX = c.x - (c.x - offsetX) * k
+                                        offsetY = c.y - (c.y - offsetY) * k
+                                        scale = target
+                                    }
+                                }
+                            } else if (scale > 1f && delta.getDistance() > 0f) {
+                                // un solo dedo: pan (el escalado ya lo lleva el caso de arriba)
                                 isTransform = true
                                 offsetX += delta.x
                                 offsetY += delta.y
+                                // velocidad suavizada, para la inercia al soltar
+                                val nowMs = System.currentTimeMillis()
+                                val dt = (nowMs - lastPanMs).coerceAtLeast(1L) / 1000f
+                                if (dt < 0.2f) panVel = panVel * 0.7f + (delta / dt) * 0.3f
+                                lastPanMs = nowMs
                             }
                             clampOffsets()
                             prevCentroid = c
