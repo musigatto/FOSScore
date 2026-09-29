@@ -15,12 +15,21 @@ interface StampDao {
     @Insert
     suspend fun insert(stamp: Stamp): Long
 
+    @Insert
+    suspend fun insertAll(stamps: List<Stamp>)
+
     @Update
     suspend fun update(stamp: Stamp)
 
     @Delete
     suspend fun delete(stamp: Stamp)
 
+    @Delete
+    suspend fun deleteAll(stamps: List<Stamp>)
+
     @Query("DELETE FROM stamps WHERE sheetHash = :hash")
     suspend fun deleteForSheet(hash: String)
+
+    @Query("DELETE FROM stamps WHERE sheetHash = :hash AND page = :page")
+    suspend fun deletePage(hash: String, page: Int)
 }

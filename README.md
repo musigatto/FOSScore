@@ -25,10 +25,21 @@
 
 - **Lenguaje:** Kotlin
 - **UI:** Jetpack Compose + Material 3
-- **Renderizado PDF:** MuPDF
+- **Renderizado PDF:** MuPDF (`com.artifex.mupdf:fitz`, AAR prebuilt con el JNI; no hace falta NDK)
 - **Base de datos:** Room (SQLite)
 - **Audio:** ExoPlayer / Media3
 - **MIDI:** framework MIDI de Android
+
+## Licencia
+
+**AGPL-3.0** (ver [LICENSE](LICENSE)). Copyright (c) 2026 Alberto.
+
+FOSScore enlaza **MuPDF**, que es AGPL-3.0: la obra combinada tiene que distribuirse bajo AGPL.
+Consecuencias prácticas:
+
+- El código fuente completo de la app es público.
+- No podemos usar librerías propietarias de Google (Play Services, AdMob, Crashlytics, ML Kit).
+- Para usar esto en software cerrado hay que comprar la licencia comercial a Artifex.
 
 ## Estado
 

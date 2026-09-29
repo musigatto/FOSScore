@@ -19,6 +19,12 @@ android {
         versionCode = 1
         versionName = "1.0"
 
+        // MuPDF trae un .so por ABI (~11 MB cada uno). minSdk 26 => solo 64 bits:
+        // con armeabi-v7a/x86 el APK subiría ~22 MB sin aportar nada.
+        ndk {
+            abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
@@ -49,6 +55,7 @@ dependencies {
     implementation(libs.androidx.room.runtime)
     implementation(libs.androidx.room.ktx)
     ksp(libs.androidx.room.compiler)
+    implementation(libs.mupdf.fitz)
     testImplementation(libs.junit)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -2,11 +2,11 @@ package com.musigatto.fosscore.ui.viewer
 
 import android.content.res.Configuration
 import android.graphics.Bitmap
-import android.graphics.Matrix
 import android.graphics.Rect
-import android.graphics.pdf.PdfRenderer
 import android.net.Uri
+import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
@@ -40,19 +40,26 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.drawscope.Stroke as DrawStroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.PointerInputChange
@@ -68,19 +75,45 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.musigatto.fosscore.FOSScoreApp
 import com.musigatto.fosscore.library.Stamp
+import com.musigatto.fosscore.library.Stroke
+import com.musigatto.fosscore.pdf.MuPdfDoc
+import java.io.IOException
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.max
-import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-// ponytail: rendering ceiling on the longest side (px). Cuts memory ~10x for big scan pages;
-// zoom past ~2.5x gets slightly soft. Upgrade path: multi-resolution cache.
-private const val MAX_RENDER_DIM = 3200
-private const val MAX_CACHED_PAGES = 4
+// El techo de render (memoria) vive ahora en MuPdfDoc.MAX_RENDER_PIXELS: MuPDF rasteriza a la
+// resolución que le pidamos, así que el zoom se ve nítido en vez de "slightly soft".
+private const val LOG_TAG = "FOSScore-PDF"
+
+// estado del gesto "estirar un tirador": qué objeto se escala desde qué esquina
+private sealed interface Resizing {
+    val startPos: Offset
+
+    data class OfStamp(
+        val stamp: Stamp,
+        override val startPos: Offset
+    ) : Resizing
+
+    data class OfStroke(
+        val stroke: Stroke,
+        val ptsPx: List<Offset>,
+        val center: Offset,   // centro de la caja: la escala crece hacia fuera desde aquí
+        override val startPos: Offset
+    ) : Resizing
+}
 
 // inverts page colors (white bg -> black, ink -> white) for OLED dark mode; applied as a
 // draw-time colorFilter so the render cache is untouched.
@@ -91,21 +124,6 @@ private val INVERT_MATRIX = floatArrayOf(
     0f, 0f, 0f, 1f, 0f
 )
 private val INVERT_FILTER = ColorFilter.colorMatrix(ColorMatrix(INVERT_MATRIX))
-
-private fun renderPage(r: PdfRenderer, idx: Int): Bitmap {
-    val page = r.openPage(idx)
-    try {
-        val scale = min(1f, MAX_RENDER_DIM.toFloat() / max(page.width, page.height))
-        val w = (page.width * scale).toInt().coerceAtLeast(1)
-        val h = (page.height * scale).toInt().coerceAtLeast(1)
-        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-        val matrix = Matrix().apply { setScale(scale, scale) }
-        page.render(bmp, null, matrix, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-        return bmp
-    } finally {
-        page.close()
-    }
-}
 
 private fun centroid(changes: List<PointerInputChange>): Offset =
     changes.fold(Offset.Zero) { acc, c -> acc + c.position } / changes.size.toFloat()
@@ -122,7 +140,7 @@ fun PdfViewerScreen(
     val configuration = LocalConfiguration.current
     val isLandscape = configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    var renderer by remember { mutableStateOf<PdfRenderer?>(null) }
+    var mupdfDoc by remember { mutableStateOf<MuPdfDoc?>(null) }
     var pageCount by remember { mutableIntStateOf(0) }
     var currentPage by rememberSaveable(pdfUri) {
         mutableIntStateOf(Settings.lastPage(context, pdfUri.toString()))
@@ -132,7 +150,12 @@ fun PdfViewerScreen(
     var halfTurned by rememberSaveable { mutableStateOf(false) }
     var navVisible by rememberSaveable { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var bitmaps by remember { mutableStateOf(emptyMap<Int, Bitmap>()) }
+    // SnapshotStateMap: al cambiar un bitmap solo se redibuja quien lee ESA clave. Con un Map
+    // normal, cambiar el bitmap invalidaba el Image + el Canvas de tinta + los sellos enteros
+    // (eso se-notaba como un tirón al cambiar la nitidez en mitad del pellizco).
+    val bitmaps = remember { mutableStateMapOf<Int, Bitmap>() }
+    // nivel de nitidez: 1 = tamaño de encaje, 2/3 = re-renderiza más grande al hacer zoom
+    var quality by remember { mutableIntStateOf(1) }
     var scale by remember { mutableFloatStateOf(1f) }
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
@@ -149,41 +172,109 @@ fun PdfViewerScreen(
     val stamps by stampsFlow.collectAsState(initial = emptyList())
     val stampRepo = (context.applicationContext as FOSScoreApp).stampRepository
 
+    val strokesFlow = remember(sheetHash) {
+        sheetHash?.let { (context.applicationContext as FOSScoreApp).strokeRepository.observe(it) }
+            ?: flowOf(emptyList())
+    }
+    val strokes by strokesFlow.collectAsState(initial = emptyList())
+    val strokeRepo = (context.applicationContext as FOSScoreApp).strokeRepository
+
     var editing by rememberSaveable { mutableStateOf(false) }
     var activeSymbol by rememberSaveable { mutableStateOf<StampSymbol?>(null) }
+    // stamp seleccionado (para el recuadro con tiradores) o trazo seleccionado
+    var selectedStrokeId by remember { mutableStateOf<Long?>(null) }
+    // tirador en curso: (objeto base, esquina agarrada) mientras se escala
+    var resizing by remember { mutableStateOf<Resizing?>(null) }
+    var activeColor by rememberSaveable { mutableStateOf<Int?>(null) }  // ARGB del tinte; null = tema
+    var drawingTool by rememberSaveable { mutableStateOf(false) }      // modo lápiz: tinta, no sellos
+    var eraserTool by rememberSaveable { mutableStateOf(false) }      // modo goma: borra sellos y trazos
+    var penWidth by remember { mutableFloatStateOf(DEFAULT_STROKE_WIDTH) }  // grosor de tinta (frac. alto página)
     var dragStamp by remember { mutableStateOf<Stamp?>(null) }
+    var dragStroke by remember { mutableStateOf<Stroke?>(null) }   // preview de mover/estirar un trazo
+    var selectedId by remember { mutableStateOf<Long?>(null) }
+    var undoStack by remember { mutableStateOf<List<Pair<Int, PageEdit>>>(emptyList()) }
+    var inkPreview by remember { mutableStateOf<List<Offset>>(emptyList()) }  // preview del trazo en curso (px)
+    // para pegar el trazo siguiente al anterior si el stylus solo alza unos ms
+    val inkTail = remember { InkTail() }
+    LaunchedEffect(currentPage, editing) { inkTail.last = null }
+    // tinta ya soltada que la BD todavía no ha devuelto: sin esto el trazo parpadea ~20 ms
+    var pendingInk by remember { mutableStateOf<List<Stroke>>(emptyList()) }
+    LaunchedEffect(currentPage, editing) { pendingInk = emptyList() }
+    // borrado optimista: la vista esconde lo borrado al instante y la BD lo confirma después.
+    // ponytail: Set de ids + poda por LaunchedEffect; suficiente porque borrar nunca resucita ids.
+    var hiddenStampIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var hiddenStrokeIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
     val editScope = rememberCoroutineScope()
 
     val swipeThresholdPx = with(LocalDensity.current) { 80.dp.toPx() }
 
-    // access-order LRU, fresh per document
-    val cache = remember(pdfUri) {
-        object : LinkedHashMap<Int, Bitmap>(MAX_CACHED_PAGES + 1, 0.75f, true) {
-            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Int, Bitmap>?): Boolean =
-                size > MAX_CACHED_PAGES
-        }
-    }
+    // MuPDF tampoco es thread-safe (comparte el Context global): serializa render/close para que
+    // un render cancelado (no cancelable a mitad de página) no colisione con el siguiente ni con
+    // close(). Ponytail: un solo mutex por documento alcanza; si algún día hay multi-documento en
+    // paralelo, moverlo a FOSScoreApp. La caché de bitmaps la lleva MuPdfDoc.
+    val rendererLock = remember(pdfUri) { Mutex() }
 
     val branch = PageFlow(currentPage, halfTurned, halfEnabled, twoUp, isLandscape, pageCount)
 
     val canEdit = sheetHash != null && !branch.showTwoUp && !(branch.showHalf && halfTurned)
 
-    // geometría y sellos de la página actual, compartidos entre overlay y gestos
-    // (ponytail: fitRect es barato, no se memoiza; el overlay de sellos solo vive en página única)
+    // geometría y sellos de la página actual, compartidos entre overlay y gestos.
+    // El encaje sale del tamaño en puntos de MuPDF (no del bitmap), así que la UI se maqueta
+    // desde el primer frame y el overlay no depende de que el render haya aterrizado.
     val currentBmp = bitmaps[currentPage]
-    val pageStamps = if (sheetHash != null) stamps.filter { it.page == currentPage } else emptyList()
-    val pageFit = if (currentBmp != null) {
+    val pageBox = mupdfDoc?.pageSize(currentPage)
+    val pageStamps = if (sheetHash != null) {
+        stamps.filter { it.page == currentPage && it.id !in hiddenStampIds }
+    } else emptyList()
+    val pageStrokes = if (sheetHash != null) {
+        strokes.filter { it.page == currentPage && it.id !in hiddenStrokeIds }
+    } else emptyList()
+    val pageFit = if (pageBox != null && pageBox.height > 0f) {
         fitRect(
             viewport.width.toFloat(),
             viewport.height.toFloat(),
-            currentBmp.width.toFloat() / currentBmp.height.toFloat()
+            pageBox.width / pageBox.height
         )
     } else RectPx(0f, 0f, 0f, 0f)
     val currentEditing by rememberUpdatedState(editing)
     val currentCanEdit by rememberUpdatedState(canEdit)
     val currentActiveSymbol by rememberUpdatedState(activeSymbol)
     val currentPageStamps by rememberUpdatedState(pageStamps)
+    val currentPageStrokes by rememberUpdatedState(pageStrokes)
     val currentPageFit by rememberUpdatedState(pageFit)
+    val currentDrawingTool by rememberUpdatedState(drawingTool)
+    val currentEraserTool by rememberUpdatedState(eraserTool)
+
+    val selectedStamp = pageStamps.firstOrNull { it.id == selectedId }
+    val selectedStroke = pageStrokes.firstOrNull { it.id == selectedStrokeId }
+
+    // recuadro de selección en px: caja del sello o del trazo. Mientras se arrastra o estira se
+    // usa la posición viva (dragStamp/dragStroke) para que el recuadro siga al objeto.
+    val selectionRect: RectPx? = when {
+        dragStamp != null -> stampRect(dragStamp!!, pageFit)
+        dragStroke != null -> strokeSelectionRect(
+            decodePoints(dragStroke!!.points).map { normalizedToPx(it, pageFit) },
+            dragStroke!!.width * pageFit.height
+        )
+        selectedStamp != null -> stampRect(selectedStamp, pageFit)
+        selectedStroke != null -> strokeSelectionRect(
+            decodePoints(selectedStroke.points).map { normalizedToPx(it, pageFit) },
+            selectedStroke.width * pageFit.height
+        )
+        else -> null
+    }
+    val currentSelectionRect by rememberUpdatedState(selectionRect)
+    val currentSelectedStamp by rememberUpdatedState(selectedStamp)
+    val currentSelectedStroke by rememberUpdatedState(selectedStroke)
+
+    // durante un tirador o un arrastre se dibuja el objeto en su posición viva, no la caja
+    val showSelection = selectionRect != null && editing && canEdit &&
+        !drawingTool && !eraserTool
+
+    // apila snapshots ANTES de cada mutación, con su página; como forScore, 10 niveles
+    fun pushUndo(snapshot: PageEdit = PageEdit(pageStamps, pageStrokes), page: Int = currentPage) {
+        undoStack = (undoStack + listOf(page to snapshot)).takeLast(10)
+    }
 
     val applyNext: () -> Unit = {
         val f = branch.next()
@@ -210,61 +301,127 @@ fun PdfViewerScreen(
         Settings.setLastPage(context, pdfUri.toString(), currentPage)
     }
 
-    // ponytail: Android PdfRenderer (zero deps). Swap to MuPDF for annotations/reflow.
+    // la BD ya no tiene lo que escondimos: limpia el borrado optimista (y el preview de arrastre)
+    LaunchedEffect(stamps, strokes) {
+        val liveStamps = stamps.map { it.id }.toSet()
+        val liveStrokes = strokes.map { it.id }.toSet()
+        if (hiddenStampIds.any { it !in liveStamps }) hiddenStampIds = hiddenStampIds intersect liveStamps
+        if (hiddenStrokeIds.any { it !in liveStrokes }) hiddenStrokeIds = hiddenStrokeIds intersect liveStrokes
+        dragStamp?.let { d ->
+            if (stamps.any { it.id == d.id && it.x == d.x && it.y == d.y && it.size == d.size }) dragStamp = null
+        }
+        dragStroke?.let { d ->
+            if (strokes.any { it.id == d.id && it.points == d.points && it.width == d.width }) dragStroke = null
+        }
+        // la BD ya trae esta tinta: fuera de la capa optimista
+        pendingInk = pendingInk.filter { p -> strokes.none { it.id == p.id && it.points == p.points } }
+    }
+
+    // MuPDF (AAR prebuilt, AGPL-3.0: ver LICENSE). Abre y calcula tamaños en segundo plano: abrir
+    // parsea el índice del PDF y no puede tocar el main.
     LaunchedEffect(pdfUri) {
         try {
-            val fd = context.contentResolver.openFileDescriptor(pdfUri, "r", null)
-            if (fd == null) {
-                error = "No se pudo abrir el archivo"
-            } else {
-                val r = PdfRenderer(fd)
-                pageCount = r.pageCount
-                currentPage = currentPage.coerceIn(0, r.pageCount - 1)
-                renderer = r
+            // NonCancellable: si el usuario sale mientras abrimos, el documento se crea igual;
+            // lo cerramos abajo. Cancelar aquí dejaría el doc nativo colgado (y su memoria).
+            val doc = withContext(NonCancellable + Dispatchers.IO) { MuPdfDoc.open(context, pdfUri) }
+            if (!isActive) {
+                withContext(NonCancellable + Dispatchers.IO) { doc.close() }
+                return@LaunchedEffect
             }
+            pageCount = doc.pageCount
+            if (pageCount > 0) currentPage = currentPage.coerceIn(0, pageCount - 1)
+            mupdfDoc = doc
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            Log.e(LOG_TAG, "no se pudo abrir el archivo: ${e.message}", e)
+            error = "No se pudo abrir el archivo"
         } catch (e: Exception) {
+            Log.e(LOG_TAG, "no se pudo abrir: ${e::class.simpleName}: ${e.message}", e)
             error = "PDF inválido o corrupto"
         }
     }
 
-    LaunchedEffect(renderer, currentPage, branch.showTwoUp, branch.showHalf, halfTurned) {
-        val r = renderer ?: return@LaunchedEffect
+    // zoom a cero al cambiar de página o de modo (la nitidez también vuelve al mínimo: si no, se
+    // paginaría renderizando cada página a 3x)
+    LaunchedEffect(currentPage, branch.showTwoUp, branch.showHalf, halfTurned) {
         scale = 1f
         offsetX = 0f
         offsetY = 0f
+        quality = 1
+    }
+
+    // Nitidez según el zoom: esperamos a que el pellizco se detenga y pedimos un re-render más
+    // grande solo si el nivel AUMENTÓ (al alejar no rebajamos: cambiar el bitmap a mitad de gesto se
+    // percibe como un tirón). Mientras tanto sigue el bitmap anterior: sin parpadeo, solo un salto
+    // de nitidez cuando aterriza.
+    LaunchedEffect(mupdfDoc) {
+        snapshotFlow { scale }.collectLatest { s ->
+            delay(180)
+            val q = ceil(s).toInt().coerceIn(1, 3)
+            if (q > quality) quality = q
+        }
+    }
+
+    // viewport es clave: en el primer frame todavía es IntSize.Zero y sin tamaño no hay render
+    LaunchedEffect(
+        mupdfDoc, currentPage, branch.showTwoUp, branch.showHalf, halfTurned, quality, viewport
+    ) {
+        val r = mupdfDoc ?: return@LaunchedEffect
+        if (quality > 1) delay(150)   // deja de re-renderizar en pleno pellizco
         val gen = ++renderGeneration
         val needed = when {
             branch.showTwoUp -> listOf(currentPage, currentPage + 1).filter { it < pageCount }
             branch.showHalf && halfTurned -> listOf(currentPage, currentPage + 1).filter { it < pageCount }
             else -> listOf(currentPage)
         }
+        // lectura del estado de Compose fuera del main: capturamos antes de entrar al dispatcher
+        val slotW = if (branch.showTwoUp) viewport.width / 2 else viewport.width
+        val slotH = viewport.height
+        val fallback = needed.associateWith { bitmaps[it] }
+        // en media página se componen las dos mitades en un bitmap nuevo: subir la nitidez ahí
+        // multiplicaría la memoria por tres sin ganancia real (es para leer, no para ampliar)
+        val q = if (branch.showHalf && halfTurned) 1 else quality
         try {
-            val session = withContext(Dispatchers.Default) {
-                val out = mutableMapOf<Int, Bitmap>()
-                for (idx in needed) {
-                    val cached = synchronized(cache) { cache[idx] }
-                    out[idx] = cached ?: renderPage(r, idx).also { bmp ->
-                        synchronized(cache) { cache[idx] = bmp }
+            val session = rendererLock.withLock {
+                withContext(Dispatchers.Default) {
+                    val out = mutableMapOf<Int, Bitmap>()
+                    for (idx in needed) {
+                        // si el render falla seguimos con lo que ya se ve: mejor tenue que hueco
+                        out[idx] = r.render(idx, slotW, slotH, q) ?: fallback[idx] ?: continue
                     }
+                    out
                 }
-                out
             }
             // guard against an older, non-cancellable render landing after a newer one
-            if (gen == renderGeneration) bitmaps = session
+            if (gen == renderGeneration) {
+                for ((idx, bmp) in session) bitmaps[idx] = bmp
+                // no acumulamos bitmaps de páginas que ya no se ven (16 MB cada uno en alta nitidez)
+                bitmaps.keys.filterNot { it in needed }.forEach { bitmaps.remove(it) }
+                // sin bitmap para esta página no hay nada que enseñar: dilo en vez de dejar el
+                // spinner girando eternamente (pasó con una página en blanco)
+                if (bitmaps[currentPage] == null) {
+                    Log.e(LOG_TAG, "la página $currentPage no se pudo renderizar")
+                    error = "No se pudo renderizar la página"
+                }
+            }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
+            Log.e(LOG_TAG, "render failed: ${e::class.simpleName}: ${e.message}", e)
             if (gen == renderGeneration) error = "No se pudo renderizar la página"
         }
     }
 
-    DisposableEffect(renderer, cache) {
-        val current = renderer
+    DisposableEffect(mupdfDoc) {
+        val current = mupdfDoc
         onDispose {
-            current?.close()
-            synchronized(cache) {
-                cache.values.forEach { it.recycle() }
-                cache.clear()
+            // nunca bloquear el main esperando a un render en vuelo (ANR): close() va a
+            // applicationScope; la cola FIFO del mutex garantiza que ocurre tras el render.
+            val scope = (context.applicationContext as FOSScoreApp).applicationScope
+            scope.launch {
+                rendererLock.withLock { current?.close() }
             }
-            bitmaps.values.forEach { it.recycle() }
         }
     }
 
@@ -300,42 +457,264 @@ fun PdfViewerScreen(
                         var totalPan = Offset.Zero
                         var isTransform = false
                         var movingStamp: Stamp? = null
-                        var resizeAnchor = 0f
-                        var resizeBase = 0f
-                        if (currentEditing && currentCanEdit) {
-                            hitStamp(down.position, currentPageStamps, currentPageFit)?.let { hit ->
-                                movingStamp = hit
-                                activeSymbol = runCatching { StampSymbol.valueOf(hit.symbol) }.getOrNull()
-                                dragStamp = hit
+                        var movingOrigin: Stamp? = null
+                        var moveDownId = down.id
+                        var moveTrackingPos = down.position
+                        var movingStroke: Stroke? = null
+                        var movingStrokeBase: Stroke? = null
+                        var moveStrokeLastPos = down.position
+                        var inkActive = false
+                        var inkPts = mutableListOf<Offset>()
+                        var eraserActive = false
+                        var eraserPath = mutableListOf<Offset>()
+                        var scaleF = 1f   // factor acumulado del tirador (siempre desde startPos)
+                        if (currentEditing && currentCanEdit && !currentDrawingTool && !currentEraserTool) {
+                            // 1) un tirador del recuadro de selección manda sobre todo lo demás:
+                            //    entrar por la esquina estira, entrar por dentro mueve.
+                            val sel = currentSelectionRect
+                            val corner = if (sel != null) hitHandle(down.position, sel, currentPageFit) else null
+                            if (corner != null) {
+                                resizing = when (val s = currentSelectedStamp) {
+                                    null -> currentSelectedStroke?.let { st ->
+                                        val ptsPx = decodePoints(st.points)
+                                            .map { normalizedToPx(it, currentPageFit) }
+                                        Resizing.OfStroke(
+                                            stroke = st,
+                                            ptsPx = ptsPx,
+                                            center = strokeBounds(ptsPx).center(),
+                                            startPos = down.position
+                                        )
+                                    }
+                                    else -> Resizing.OfStamp(stamp = s, startPos = down.position)
+                                }
                             }
+                            if (resizing == null) {
+                                val hitS = hitStamp(down.position, currentPageStamps, currentPageFit)
+                                val hitT = if (hitS == null) {
+                                    hitStroke(down.position, currentPageStrokes, currentPageFit)
+                                } else null
+                                if (hitS != null) {
+                                    movingStamp = hitS
+                                    movingOrigin = hitS
+                                    selectedId = hitS.id
+                                    selectedStrokeId = null
+                                    activeSymbol = runCatching { StampSymbol.valueOf(hitS.symbol) }.getOrNull()
+                                    dragStamp = hitS
+                                } else if (hitT != null) {
+                                    movingStroke = hitT
+                                    movingStrokeBase = hitT
+                                    moveStrokeLastPos = down.position
+                                    selectedStrokeId = hitT.id
+                                    selectedId = null
+                                    dragStroke = hitT
+                                }
+                            }
+                        }
+                        if (currentEditing && currentCanEdit && currentEraserTool) {
+                            eraserActive = true
+                            eraserPath.add(down.position)
+                            inkPreview = listOf(down.position)
+                        }
+                        if (currentEditing && currentCanEdit && currentDrawingTool) {
+                            inkActive = true
+                            inkPts.add(down.position)
+                            inkPreview = listOf(down.position)
                         }
 
                         while (true) {
                             val event = awaitPointerEvent()
                             val pressed = event.changes.filter { it.pressed }
                             if (pressed.isEmpty()) {
-                                if (movingStamp != null) {
+                                if (resizing != null) {
+                                    val rz = resizing
+                                    resizing = null
+                                    when (rz) {
+                                        is Resizing.OfStamp -> {
+                                            val base = rz.stamp
+                                            val newSize = (base.size * scaleF)
+                                                .coerceIn(MIN_STAMP_SIZE, MAX_STAMP_SIZE)
+                                            if (kotlin.math.abs(newSize - base.size) > 1e-4f) {
+                                                pushUndo(PageEdit(currentPageStamps, currentPageStrokes))
+                                                editScope.launch {
+                                                    stampRepo.update(base.copy(size = newSize))
+                                                }
+                                            }
+                                        }
+                                        is Resizing.OfStroke -> {
+                                            val base = rz.stroke
+                                            val pts = scalePoints(rz.ptsPx, rz.center, scaleF)
+                                            val newW = (base.width * scaleF)
+                                                .coerceIn(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
+                                            if (kotlin.math.abs(newW - base.width) > 1e-5f ||
+                                                pts != rz.ptsPx
+                                            ) {
+                                                pushUndo(PageEdit(currentPageStamps, currentPageStrokes))
+                                                editScope.launch {
+                                                    strokeRepo.update(
+                                                        base.copy(
+                                                            points = encodePoints(
+                                                                pts.map { pxToNormalized(it, currentPageFit) }
+                                                            ),
+                                                            width = newW
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        null -> {}  // resizing es una var capturada: puede ser null
+                                    }
+                                } else if (inkActive) {
+                                    inkActive = false
+                                    val pts = samplePoints(inkPts, MIN_SAMPLE_DIST_PX)
+                                    inkPts = mutableListOf()
+                                    inkPreview = emptyList()
+                                    if (pts.size >= 2 && sheetHash != null && currentPageFit.width > 0f) {
+                                        pushUndo(PageEdit(currentPageStamps, currentPageStrokes))
+                                        val norm = pts.map { pxToNormalized(it, currentPageFit) }
+                                        val fit = currentPageFit
+                                        val page = currentPage
+                                        val hash = sheetHash
+                                        val width = penWidth
+                                        val color = activeColor
+                                        val startPx = pts.first()   // comparación en px, no normalizado
+                                        editScope.launch {
+                                            val now = android.os.SystemClock.uptimeMillis()
+                                            val prev = inkTail.last
+                                            val prevPts = prev?.points?.let { decodePoints(it) }
+                                                ?.map { normalizedToPx(it, fit) } ?: emptyList()
+                                            val canMerge = prev != null && prevPts.isNotEmpty() &&
+                                                shouldMergeStroke(
+                                                    prevPts.last(),
+                                                    startPx,
+                                                    fit,
+                                                    now - inkTail.at,
+                                                    prev.width == width && prev.color == color
+                                                )
+                                            Log.d(LOG_TAG, "ink: merge=$canMerge gap=${now - inkTail.at}ms prev=${prev != null} dist=${if (prevPts.isNotEmpty()) (startPx - prevPts.last()).getDistance() else -1f}px limit=${STROKE_MERGE_DIST_FRAC * fit.height}px")
+                                            if (canMerge) {
+                                                val merged = prev!!.copy(
+                                                    points = encodePoints(decodePoints(prev.points) + norm)
+                                                )
+                                                strokeRepo.update(merged)
+                                                inkTail.last = merged
+                                                pendingInk = pendingInk.filter { it.id != merged.id } + merged
+                                            } else {
+                                                val s = Stroke(
+                                                    sheetHash = hash,
+                                                    page = page,
+                                                    points = encodePoints(norm),
+                                                    width = width,
+                                                    color = color
+                                                )
+                                                val stored = s.copy(id = strokeRepo.insert(s))
+                                                inkTail.last = stored
+                                                pendingInk = pendingInk + stored
+                                            }
+                                            inkTail.at = now
+                                        }
+                                    }
+                                } else if (eraserActive) {
+                                    eraserActive = false
+                                    val path = eraserPath
+                                    eraserPath = mutableListOf()
+                                    inkPreview = emptyList()
+                                    if (path.isNotEmpty() && sheetHash != null && currentPageFit.width > 0f) {
+                                        pushUndo(PageEdit(currentPageStamps, currentPageStrokes))
+                                        val radiusPx = ERASE_RADIUS_FRAC * currentPageFit.height
+                                        // la goma siempre borra lo que roza: para quitar una palabra
+                                        // entera, tocarla (la selecciona) y luego 🗑
+                                        val goneStamps = currentPageStamps.filter { st ->
+                                            val r = stampRect(st, currentPageFit)
+                                            path.any { r.contains(it) }
+                                        }
+                                        val goneStrokes = mutableListOf<Stroke>()
+                                        val newRuns = mutableListOf<Stroke>()
+                                        for (st in currentPageStrokes) {
+                                            val ptsPx = decodePoints(st.points).map { normalizedToPx(it, currentPageFit) }
+                                            val runs = eraseStrokePoints(ptsPx, path, radiusPx)
+                                            if (runs.size == 1 && runs[0].size == ptsPx.size) {
+                                                // intacto
+                                            } else {
+                                                goneStrokes.add(st)
+                                                runs.forEach { r ->
+                                                    newRuns.add(
+                                                        st.copy(
+                                                            id = 0,
+                                                            points = encodePoints(r.map { pxToNormalized(it, currentPageFit) })
+                                                        )
+                                                    )
+                                                }
+                                            }
+                                        }
+                                        selectedId = null
+                                        selectedStrokeId = null
+                                        inkTail.last = null   // el trazo anterior ya no existe
+                                        // que se vea borrado YA: la BD va por detrás (~20 ms)
+                                        hiddenStampIds = hiddenStampIds + goneStamps.map { it.id }
+                                        hiddenStrokeIds = hiddenStrokeIds + goneStrokes.map { it.id }
+                                        editScope.launch {
+                                            if (goneStamps.isNotEmpty()) stampRepo.deleteAll(goneStamps)
+                                            if (goneStrokes.isNotEmpty()) {
+                                                strokeRepo.deleteAll(goneStrokes)
+                                                strokeRepo.insertAll(newRuns)
+                                            }
+                                        }
+                                    }
+                                } else if (movingStroke != null) {
+                                    val done = movingStroke
+                                    val base = movingStrokeBase
+                                    movingStroke = null
+                                    movingStrokeBase = null
+                                    // mantener la posición final: si se limpia aquí, el overlay dibuja la
+                                    // posición vieja de la BD unos ms hasta que el flow re-emite (glitch).
+                                    dragStroke = done
+                                    if (done != null && base != null) {
+                                        if (done.points != base.points) {
+                                            pushUndo(PageEdit(currentPageStamps, currentPageStrokes))
+                                            editScope.launch { strokeRepo.update(done) }
+                                        }
+                                    }
+                                } else if (movingStamp != null) {
                                     val done = movingStamp
+                                    val origin = movingOrigin
                                     movingStamp = null
-                                    dragStamp = null
-                                    if (done != null) editScope.launch { stampRepo.update(done) }
+                                    movingOrigin = null
+                                    // mantener la posición final: si se limpia aquí, el overlay dibuja la
+                                    // posición vieja de la BD unos ms hasta que el flow re-emite (glitch).
+                                    dragStamp = done
+                                    if (done != null) {
+                                        if (origin != null && (done.x != origin.x || done.y != origin.y)) {
+                                            pushUndo(PageEdit(currentPageStamps, currentPageStrokes))
+                                        }
+                                        editScope.launch { stampRepo.update(done) }
+                                    }
                                 } else if (!isTransform) {
                                     if (currentEditing && currentCanEdit) {
                                         // tap en modo editar: coloca el sello activo en el punto tocado
                                         val sym = currentActiveSymbol
+                                        if (sym == null) {
+                                            // sin herramienta: solo deseleccionar
+                                            selectedId = null
+                                            selectedStrokeId = null
+                                            dragStamp = null
+                                            dragStroke = null
+                                        }
                                         if (sym != null && sheetHash != null && scale <= 1f) {
                                             val pos = pxToNormalized(down.position, currentPageFit)
+                                            pushUndo(PageEdit(currentPageStamps, currentPageStrokes))
                                             editScope.launch {
-                                                stampRepo.insert(
+                                                val id = stampRepo.insert(
                                                     Stamp(
                                                         sheetHash = sheetHash,
                                                         page = currentPage,
                                                         symbol = sym.name,
                                                         x = pos.x.coerceIn(0f, 1f),
                                                         y = pos.y.coerceIn(0f, 1f),
-                                                        size = DEFAULT_STAMP_SIZE
+                                                        size = DEFAULT_STAMP_SIZE,
+                                                        color = activeColor
                                                     )
                                                 )
+                                                selectedId = id
                                             }
                                         }
                                     } else {
@@ -358,33 +737,108 @@ fun PdfViewerScreen(
                                 break
                             }
 
-                            if (movingStamp != null) {
-                                // mover con 1 dedo; pinch (2do dedo) redimensiona el sello, no la página
-                                if (pressed.size > 1) {
-                                    val d = (pressed[0].position - pressed[1].position).getDistance()
-                                    if (resizeAnchor == 0f) {
-                                        resizeAnchor = d
-                                        resizeBase = movingStamp.size
-                                    } else if (d > 0f) {
-                                        val ns = movingStamp!!.copy(
-                                            size = (resizeBase * d / resizeAnchor).coerceIn(MIN_STAMP_SIZE, MAX_STAMP_SIZE)
-                                        )
-                                        movingStamp = ns
-                                        dragStamp = ns
-                                    }
-                                } else {
-                                    val m = pxToNormalized(centroid(pressed), currentPageFit) -
-                                        pxToNormalized(prevCentroid, currentPageFit)
-                                    val ns = movingStamp!!.copy(
-                                        x = (movingStamp!!.x + m.x).coerceIn(0f, 1f),
-                                        y = (movingStamp!!.y + m.y).coerceIn(0f, 1f)
-                                    )
-                                    movingStamp = ns
-                                    dragStamp = ns
+                            if (resizing != null) {
+                                // estirar por un tirador: 1 puntero, escala sobre el centro.
+                                // el factor se recalcula desde la posición inicial, nunca se acumula
+                                val tracking = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
+                                val rz = resizing!!
+                                val center = when (rz) {
+                                    is Resizing.OfStamp -> stampRect(rz.stamp, currentPageFit).center()
+                                    is Resizing.OfStroke -> rz.center
                                 }
+                                val f = scaleFactor(center, rz.startPos, tracking.position)
+                                scaleF = f
+                                when (rz) {
+                                    is Resizing.OfStamp -> {
+                                        dragStamp = rz.stamp.copy(
+                                            size = (rz.stamp.size * f).coerceIn(MIN_STAMP_SIZE, MAX_STAMP_SIZE)
+                                        )
+                                    }
+                                    is Resizing.OfStroke -> {
+                                        val pts = scalePoints(rz.ptsPx, center, f)
+                                        dragStroke = rz.stroke.copy(
+                                            points = encodePoints(pts.map { pxToNormalized(it, currentPageFit) }),
+                                            width = (rz.stroke.width * f).coerceIn(MIN_STROKE_WIDTH, MAX_STROKE_WIDTH)
+                                        )
+                                    }
+                                }
+                                prevCentroid = tracking.position
+                                event.changes.forEach { change -> if (change.positionChanged()) change.consume() }
+                                continue
+                            }
+
+                            if (movingStroke != null) {
+                                val tracking = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
+                                val m = pxToNormalized(tracking.position, currentPageFit) -
+                                    pxToNormalized(moveStrokeLastPos, currentPageFit)
+                                moveStrokeLastPos = tracking.position
+                                val ns = movingStroke!!.copy(
+                                    points = encodePoints(
+                                        decodePoints(movingStroke!!.points).map {
+                                            Offset((it.x + m.x).coerceIn(0f, 1f), (it.y + m.y).coerceIn(0f, 1f))
+                                        }
+                                    )
+                                )
+                                movingStroke = ns
+                                dragStroke = ns
+                                prevCentroid = tracking.position
+                                event.changes.forEach { change -> if (change.positionChanged()) change.consume() }
+                                continue
+                            }
+
+                            if (movingStamp != null) {
+                                // mover con 1 dedo (el puntero inicial, sin saltos al añadir otro dedo);
+                                // sin reescalar por pellizco — forScore ajusta el tamaño con un slider
+                                val tracking = pressed.firstOrNull { it.id == moveDownId } ?: pressed.first()
+                                val m = pxToNormalized(tracking.position, currentPageFit) -
+                                    pxToNormalized(moveTrackingPos, currentPageFit)
+                                moveTrackingPos = tracking.position
+                                val ns = movingStamp!!.copy(
+                                    x = (movingStamp!!.x + m.x).coerceIn(0f, 1f),
+                                    y = (movingStamp!!.y + m.y).coerceIn(0f, 1f)
+                                )
+                                movingStamp = ns
+                                dragStamp = ns
                                 prevCentroid = centroid(pressed)
                                 event.changes.forEach { change -> if (change.positionChanged()) change.consume() }
                                 continue
+                            }
+
+                            if (inkActive) {
+                                if (pressed.size > 1) {
+                                    // llegó un segundo dedo: abandona la tinta, deja que el pellizco haga zoom
+                                    inkActive = false
+                                    inkPts = mutableListOf()
+                                    inkPreview = emptyList()
+                                } else {
+                                    val tracking = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
+                                    val last = inkPts.last()
+                                    if ((tracking.position - last).getDistance() >= MIN_SAMPLE_DIST_PX) {
+                                        inkPts.add(tracking.position)
+                                        inkPreview = inkPts.toList()
+                                    }
+                                    prevCentroid = tracking.position
+                                    event.changes.forEach { change -> if (change.positionChanged()) change.consume() }
+                                    continue
+                                }
+                            }
+
+                            if (eraserActive) {
+                                if (pressed.size > 1) {
+                                    eraserActive = false
+                                    eraserPath = mutableListOf()
+                                    inkPreview = emptyList()
+                                } else {
+                                    val tracking = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
+                                    val last = eraserPath.last()
+                                    if ((tracking.position - last).getDistance() >= MIN_SAMPLE_DIST_PX) {
+                                        eraserPath.add(tracking.position)
+                                        inkPreview = eraserPath.toList()
+                                    }
+                                    prevCentroid = tracking.position
+                                    event.changes.forEach { change -> if (change.positionChanged()) change.consume() }
+                                    continue
+                                }
                             }
 
                             val nids = pressed.map { it.id }.toSet()
@@ -450,7 +904,9 @@ fun PdfViewerScreen(
                     val w = cur.width
                     val h = cur.height
                     val sepColor = MaterialTheme.colorScheme.primary.toArgb()
-                    val combined = remember(bitmaps, currentPage, halfTurned) {
+                    // remember por los BITMAPS (no por el mapa): con SnapshotStateMap, leer las
+                    // claves arriba ya registra la dependencia y solo se recompone si cambian
+                    val combined = remember(cur, next, w, h) {
                         val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
                         val canvas = android.graphics.Canvas(out)
                         val paint = android.graphics.Paint().apply { isFilterBitmap = true }
@@ -481,6 +937,54 @@ fun PdfViewerScreen(
                                 )
                                 if (canEdit) {
                                     val density = LocalDensity.current
+                                    // por defecto tinta/sellos en negro (no el primary azulado del tema)
+                                    val themeColor = Color.Black
+                                    Canvas(modifier = Modifier.fillMaxSize()) {
+                                        fun drawStrokePath(pts: List<Offset>, color: Color, widthPx: Float) {
+                                            if (pts.size < 2) return
+                                            val path = Path()
+                                            path.moveTo(pts[0].x, pts[0].y)
+                                            for (i in 1 until pts.size) path.lineTo(pts[i].x, pts[i].y)
+                                            drawPath(
+                                                path,
+                                                color = color,
+                                                style = DrawStroke(
+                                                    width = max(1f, widthPx),
+                                                    cap = StrokeCap.Round,
+                                                    join = StrokeJoin.Round
+                                                )
+                                            )
+                                        }
+                                        // pendingInk va primero: si el flujo aún trae la versión
+                                        // anterior (tras una fusión), gana la que se está escribiendo
+                                        for (stroke in (pendingInk + pageStrokes).distinctBy { it.id }) {
+                                            // el que se está moviendo/estirando se dibuja solo en su
+                                            // posición viva (si no, quedan dos copias = fantasma)
+                                            if (dragStroke?.id == stroke.id) continue
+                                            drawStrokePath(
+                                                decodePoints(stroke.points).map { normalizedToPx(it, pageFit) },
+                                                stampColor(stroke.color, themeColor),
+                                                stroke.width * pageFit.height
+                                            )
+                                        }
+                                        // trazo seleccionado movido/estirado en vivo
+                                        dragStroke?.let { ds ->
+                                            drawStrokePath(
+                                                decodePoints(ds.points).map { normalizedToPx(it, pageFit) },
+                                                stampColor(ds.color, themeColor),
+                                                ds.width * pageFit.height
+                                            )
+                                        }
+                                        if (inkPreview.size >= 2) {
+                                            drawStrokePath(
+                                                inkPreview,
+                                                if (eraserTool) Color.Red.copy(alpha = 0.4f)
+                                                else stampColor(activeColor, themeColor),
+                                                if (eraserTool) ERASE_RADIUS_FRAC * pageFit.height * 2f
+                                                else penWidth * pageFit.height
+                                            )
+                                        }
+                                    }
                                     for (stamp in pageStamps) {
                                         val shown = dragStamp?.takeIf { it.id == stamp.id } ?: stamp
                                         val sym = runCatching { StampSymbol.valueOf(shown.symbol) }.getOrNull()
@@ -489,11 +993,39 @@ fun PdfViewerScreen(
                                         StampView(
                                             symbol = sym,
                                             sizePx = r.width,
-                                            color = MaterialTheme.colorScheme.primary,
+                                            color = stampColor(shown.color, Color.Black),
                                             modifier = Modifier
                                                 .offset { IntOffset(r.left.roundToInt(), r.top.roundToInt()) }
                                                 .size(with(density) { r.width.toDp() })
                                         )
+                                    }
+                                    // recuadro de selección POR ENCIMA de todo: si no, los tiradores
+                                    // quedan tapados por el propio sello que se está editando
+                                    if (showSelection && selectionRect != null) {
+                                        val sel = selectionRect
+                                        val hr = handleRadiusPx(pageFit)
+                                        val frame = Color(0xFF00A0FF)
+                                        Canvas(modifier = Modifier.fillMaxSize()) {
+                                            drawRect(
+                                                color = frame,
+                                                topLeft = Offset(sel.left, sel.top),
+                                                size = Size(sel.width, sel.height),
+                                                style = DrawStroke(width = max(1.5f, hr * 0.3f))
+                                            )
+                                            handleCenters(sel, pageFit).forEach { hc ->
+                                                drawRect(
+                                                    color = Color.White,
+                                                    topLeft = Offset(hc.x - hr, hc.y - hr),
+                                                    size = Size(hr * 2f, hr * 2f)
+                                                )
+                                                drawRect(
+                                                    color = frame,
+                                                    topLeft = Offset(hc.x - hr, hc.y - hr),
+                                                    size = Size(hr * 2f, hr * 2f),
+                                                    style = DrawStroke(width = max(1.5f, hr * 0.3f))
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -570,6 +1102,17 @@ fun PdfViewerScreen(
                             twoUp = false
                             halfEnabled = false
                             halfTurned = false
+                        } else {
+                            undoStack = emptyList()
+                            selectedId = null
+                            selectedStrokeId = null
+                            dragStamp = null
+                            dragStroke = null
+                            drawingTool = false
+                            eraserTool = false
+                            inkPreview = emptyList()
+                            hiddenStampIds = emptySet()
+                            hiddenStrokeIds = emptySet()
                         }
                     },
                     enabled = canEdit,
@@ -617,10 +1160,162 @@ fun PdfViewerScreen(
                             StampPaletteButton(
                                 symbol = sym,
                                 selected = sym == activeSymbol,
-                                onClick = { activeSymbol = sym }
+                                onClick = {
+                                    activeSymbol = sym
+                                    drawingTool = false
+                                    eraserTool = false
+                                }
                             )
                             Spacer(Modifier.width(4.dp))
                         }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState())
+                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        // swatch transparen = sin tinte (color del tema)
+                        ColorSwatchButton(
+                            color = Color.Transparent,
+                            selected = activeColor == null,
+                            onClick = {
+                                val s = selectedStamp
+                                activeColor = null
+                                if (s != null && s.color != null) {
+                                    pushUndo()
+                                    editScope.launch { stampRepo.update(s.copy(color = null)) }
+                                }
+                            }
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        SWATCH_COLORS.forEach { c ->
+                            ColorSwatchButton(
+                                color = c,
+                                selected = activeColor == c.toArgb(),
+                                onClick = {
+                                    activeColor = c.toArgb()
+                                    val s = selectedStamp
+                                    if (s != null && s.color != c.toArgb()) {
+                                        pushUndo()
+                                        editScope.launch { stampRepo.update(s.copy(color = c.toArgb())) }
+                                    }
+                                }
+                            )
+                            Spacer(Modifier.width(6.dp))
+                        }
+                    }
+                }
+                if (editing && canEdit) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 4.dp)
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Button(
+                            onClick = {
+                                drawingTool = !drawingTool
+                                if (drawingTool) {
+                                    activeSymbol = null
+                                    eraserTool = false
+                                    selectedId = null
+                                }
+                            },
+                            colors = if (drawingTool) ButtonDefaults.buttonColors()
+                            else ButtonDefaults.outlinedButtonColors()
+                        ) { Text("✏️") }
+                        Spacer(Modifier.width(4.dp))
+                        Button(
+                            onClick = {
+                                eraserTool = !eraserTool
+                                if (eraserTool) {
+                                    activeSymbol = null
+                                    drawingTool = false
+                                    selectedId = null
+                                    selectedStrokeId = null
+                                    inkPreview = emptyList()
+                                }
+                            },
+                            colors = if (eraserTool) ButtonDefaults.buttonColors()
+                            else ButtonDefaults.outlinedButtonColors()
+                        ) { Text("🩹") }
+                        Spacer(Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                val (page, edit) = undoStack.lastOrNull() ?: return@Button
+                                undoStack = undoStack.dropLast(1)
+                                selectedId = null
+                                selectedStrokeId = null
+                                dragStamp = null
+                                dragStroke = null
+                                inkTail.last = null
+                                if (sheetHash != null) {
+                                    editScope.launch {
+                                        stampRepo.restorePage(sheetHash, page, edit.stamps)
+                                        strokeRepo.restorePage(sheetHash, page, edit.strokes)
+                                    }
+                                }
+                            },
+                            enabled = undoStack.isNotEmpty()
+                        ) { Text("↶") }
+                        Spacer(Modifier.width(8.dp))
+                        if (drawingTool) {
+                            Text("Grosor", style = MaterialTheme.typography.bodyMedium)
+                            Slider(
+                                value = penWidth,
+                                onValueChange = { penWidth = it },
+                                valueRange = MIN_STROKE_WIDTH..MAX_STROKE_WIDTH,
+                                modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                            )
+                            Text("${(penWidth * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        if (selectedStamp != null) {
+                            val s = selectedStamp
+                            var sliderUndoPushed by remember { mutableStateOf(false) }
+                            Text("Tamaño", style = MaterialTheme.typography.bodyMedium)
+                            Slider(
+                                value = s.size.coerceIn(MIN_STAMP_SIZE, MAX_STAMP_SIZE),
+                                onValueChange = { v ->
+                                    val current = pageStamps.firstOrNull { it.id == selectedId }
+                                    if (current != null && v != current.size) {
+                                        if (!sliderUndoPushed) {
+                                            pushUndo()
+                                            sliderUndoPushed = true
+                                        }
+                                        editScope.launch { stampRepo.update(current.copy(size = v)) }
+                                    }
+                                },
+                                onValueChangeFinished = { sliderUndoPushed = false },
+                                valueRange = MIN_STAMP_SIZE..MAX_STAMP_SIZE,
+                                modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                            )
+                            Text("${(s.size * 100).roundToInt()}%", style = MaterialTheme.typography.bodyMedium)
+                            Spacer(Modifier.width(8.dp))
+                        }
+                        Button(
+                            onClick = {
+                                val s = selectedStamp
+                                val t = selectedStroke
+                                if (s == null && t == null) return@Button
+                                pushUndo()
+                                selectedId = null
+                                selectedStrokeId = null
+                                inkTail.last = null
+                                hiddenStampIds = hiddenStampIds + listOfNotNull(s?.id)
+                                hiddenStrokeIds = hiddenStrokeIds + listOfNotNull(t?.id)
+                                editScope.launch {
+                                    s?.let { stampRepo.delete(it) }
+                                    t?.let { strokeRepo.delete(it) }
+                                }
+                            },
+                            enabled = selectedStamp != null || selectedStroke != null
+                        ) { Text("🗑") }
                     }
                 }
                 Row(

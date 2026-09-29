@@ -8,6 +8,7 @@ kotlin = "2.2.10"
 composeBom = "2026.02.01"
 room = "2.7.2"
 ksp = "2.2.10-2.0.2"
+mupdf = "1.28.5"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -22,6 +23,8 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+# MuPDF: motor C de PDF con el JNI prebuilt en el propio AAR (no hace falta NDK). AGPL-3.0.
+mupdf-fitz = { group = "com.artifex.mupdf", name = "fitz", version.ref = "mupdf" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
