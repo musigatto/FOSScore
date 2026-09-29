@@ -491,12 +491,14 @@ fun PdfViewerScreen(
         } else if (bitmaps.isNotEmpty()) {
             val zoomMod = Modifier
                 .fillMaxSize()
-                .graphicsLayer(
+                .graphicsLayer {
                     // Origen arriba-izquierda: así la capa cumple screen = scale*p + offset, que es
                     // lo que asume la matemática del anclaje del pellizco (ver clampOffsets).
-                    transformOrigin = TransformOrigin(0f, 0f),
-                    scaleX = scale, scaleY = scale,
-                    translationX = offsetX, translationY = offsetY,
+                    transformOrigin = TransformOrigin(0f, 0f)
+                    scaleX = scale
+                    scaleY = scale
+                    translationX = offsetX
+                    translationY = offsetY
                     // Sin esto Compose escala la textura con "vecino más cercano" en los
                     // ampliados grandes y la imagen "cuece" al hacer zoom (el conocido jittery
                     // scale animations; ver halilibo.com/2024/why-text-gets-jittery-when-scaled-
@@ -505,7 +507,7 @@ fun PdfViewerScreen(
                     // porque rasteriza el contenido y lo escala como imagen: más suave, pero con
                     // blur justo donde MuPDF nos da la nitidez que buscamos.
                     filterQuality = FilterQuality.Low
-                )
+                }
                 .pointerInput(Unit) {
                     awaitEachGesture {
                         val down = awaitFirstDown(requireUnconsumed = false)
