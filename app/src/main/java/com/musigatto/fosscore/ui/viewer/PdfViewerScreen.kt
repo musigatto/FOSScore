@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -51,6 +52,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -101,6 +103,10 @@ import kotlinx.coroutines.withContext
 // El techo de render (memoria) vive ahora en MuPdfDoc.MAX_RENDER_PIXELS: MuPDF rasteriza a la
 // resolución que le pidamos, así que el zoom se ve nítido en vez de "slightly soft".
 private const val LOG_TAG = "FOSScore-PDF"
+
+// TEMPORAL: formato corto para el log de diagnóstico del zoom en el S6 Lite (se quita al cerrar
+// el bug). Sin Locale para que no cambie con el idioma del dispositivo.
+private fun f1(v: Float): String = if (v.isFinite()) ((v * 10).roundToInt() / 10f).toString() else "?"
 
 // Ruido del táctil con los dedos quietos: ±1 px sobre ~400 px entre dedos ≈ 0,25 %. Con 0,4 % de
 // zona muerta el zoom no reacciona al ruido (si no, el contenido "respira" y parece que tiembla).
@@ -413,6 +419,9 @@ fun PdfViewerScreen(
         if (v.getDistance() < 600f) return@LaunchedEffect
         var px = offsetX
         var py = offsetY
+        val fromX = px
+        val fromY = py
+        Log.d(LOG_TAG, "INERCIA empieza v=${f1(v.x)},${f1(v.y)} off=${f1(px)},${f1(py)}")
         while (v.getDistance() > 20f) {
             delay(16)
             px += v.x * 0.016f
@@ -426,6 +435,11 @@ fun PdfViewerScreen(
             if (offsetX == bx && offsetY == by) break
             v *= 0.965f   // fricción larga: el glide se siente, no se corta a los 200 ms
         }
+        Log.d(
+            LOG_TAG,
+            "INERCIA acaba off=${f1(offsetX)},${f1(offsetY)} " +
+                "recorrido=${f1(offsetX - fromX)},${f1(offsetY - fromY)}"
+        )
     }
 
     // Re-render al zoom actual (escalones del 10% del encaje, ZoomMath.renderBucket): como los
@@ -575,8 +589,24 @@ fun PdfViewerScreen(
                         var ids = setOf(down.id)
                         var prevCentroid = down.position
                         var anchorDist = 0f
+                        // FOCO del pellizco: posición de pantalla donde se han posado los dedos.
+                        // El zoom crece alrededor de ESTE punto fijo y no sigue su deslizamiento
+                        // (antes anclaba al centroide vivo + pan de 2 dedos: el punto tocado se
+                        // escapaba -> "no amplía donde quiero").
+                        var pinchAnchor = down.position
+                        // TEMPORAL: punto de página bajo el ancla al empezar el gesto. No se
+                        // recalcula nunca: sirve para ver si algo lo mueve durante el pellizco.
+                        var pinchFit0 = downF
                         var totalPan = Offset.Zero
                         var isTransform = false
+                        // TEMPORAL/diagnóstico: si el gesto llegó a tener 2+ dedos fue un
+                        // pellizco, y un pellizco NO debe arrancar la inercia de paneo: al
+                        // levantar un dedo, el otro se resbala un milímetro al soltar, eso
+                        // alimentaba panVel y la página se iba sola cientos de px DESPUÉS de un
+                        // zoom que era correcto. ponytail: upgrade si quieres inercia tras un
+                        // pellizco = medir la velocidad del centroide SOLO en los frames en que
+                        // los 2 dedos se mueven juntos y no cambia la distancia.
+                        var sawMultiTouch = false
                         var movingStamp: Stamp? = null
                         var movingOrigin: Stamp? = null
                         var moveDownId = down.id
@@ -834,13 +864,38 @@ fun PdfViewerScreen(
                                             offsetY = no.y
                                             scale = DOUBLE_TAP_ZOOM
                                             clampOffsets()
+                                            val f2 = fitPoint(down.position)
+                                            val drawn2 = anchorBase + Offset(offsetX, offsetY) + f2 * scale
+                                            Log.d(
+                                                LOG_TAG,
+                                                "ZOOM doble k=${f1(scale)} off=${f1(offsetX)},${f1(offsetY)} " +
+                                                    "draw=${f1(anchorBase.x + offsetX)},${f1(anchorBase.y + offsetY)} " +
+                                                    "toque=${f1(down.position.x)},${f1(down.position.y)} " +
+                                                    "sale=${f1(drawn2.x)},${f1(drawn2.y)} " +
+                                                    "residuo=${f1((drawn2 - down.position).getDistance())}"
+                                            )
                                         }
                                         lastTapMs = 0L
                                     } else {
                                         lastTapMs = nowMs
                                         lastTapPos = down.position
-                                        flingVel = if (panVel.getDistance() > 600f) panVel else Offset.Zero
+                                        // La inercia solo si el gesto fue un paneo real de UN dedo.
+                                        // Tras un pellizco (2+ dedos) el resto del dedo se resbala
+                                        // al soltar y disparaba un glide de cientos de px que se
+                                        // llevaba la página lejos del punto ampliado.
+                                        flingVel = if (!sawMultiTouch && panVel.getDistance() > 600f) {
+                                            panVel
+                                        } else {
+                                            Offset.Zero
+                                        }
                                     }
+                                    Log.d(
+                                        LOG_TAG,
+                                        "FIN gesto k=${f1(scale)} off=${f1(offsetX)},${f1(offsetY)} " +
+                                            "panVel=${f1(panVel.x)},${f1(panVel.y)} " +
+                                            "flingVel=${f1(flingVel.x)},${f1(flingVel.y)} " +
+                                            "multi=${sawMultiTouch} pan=${f1(totalPan.x)},${f1(totalPan.y)}"
+                                    )
                                     if (isDoubleTap) {
                                         // ya gestionado arriba: ni coloca sello ni cambia de página
                                     } else if (currentEditing && currentCanEdit) {
@@ -1003,6 +1058,15 @@ fun PdfViewerScreen(
 
                             val nids = pressed.map { it.id }.toSet()
                             if (nids != ids) {
+                                // TEMPORAL: al cambiar el nº de dedos el centroide salta media
+                                // separación de dedos. Aquí se re-ancila (delta=0); si ese salto se
+                                // colara como pan, la página se teletransportaba ±215 px al soltar
+                                // un dedo del pellizco.
+                                Log.d(
+                                    LOG_TAG,
+                                    "DEDOS ${ids.size}->${nids.size} c=${f1(centroid(pressed).x)}," +
+                                        "${f1(centroid(pressed).y)} off=${f1(offsetX)},${f1(offsetY)}"
+                                )
                                 ids = nids
                                 anchorDist = 0f      // se reancla al cambiar el nº de dedos
                                 prevCentroid = centroid(pressed)
@@ -1014,9 +1078,26 @@ fun PdfViewerScreen(
 
                             if (pressed.size > 1) {
                                 isTransform = true
+                                sawMultiTouch = true
                                 val d = (pressed[0].position - pressed[1].position).getDistance()
                                 if (anchorDist == 0f) {
                                     anchorDist = d
+                                    // FOCO FIJO: el dedo con el que se apunta (el primero que tocó),
+                                    // NO el punto medio de los dos. Con el punto medio, plantar un
+                                    // dedo en un compás y abrir con el otro ampliaba alrededor del
+                                    // medio: el compás apuntado se iba de la pantalla y te quedaba
+                                    // delante otro ("no amplía donde yo quiero"). El segundo dedo
+                                    // solo marca el nivel de zoom.
+                                    // Si el dedo que apunta se levanta a mitad de gesto, se conserva
+                                    // el foco anterior en vez de saltar al dedo que quede.
+                                    pressed.firstOrNull { it.id == down.id }?.let { pinchAnchor = it.position }
+                                    pinchFit0 = fitPoint(pinchAnchor)
+                                    Log.d(
+                                        LOG_TAG,
+                                        "ZOOM start ancla=${f1(pinchAnchor.x)},${f1(pinchAnchor.y)} " +
+                                            "fit=${f1(pinchFit0.x)},${f1(pinchFit0.y)} " +
+                                            "base=${f1(anchorBase.x)},${f1(anchorBase.y)} k=${f1(scale)}"
+                                    )
                                 } else if (d > 0f) {
                                     // INCREMENTAL: aplicamos cuánto ha cambiado la distancia entre
                                     // los dedos en ESTE frame (ratio), no un objetivo absoluto. Con un
@@ -1028,20 +1109,36 @@ fun PdfViewerScreen(
                                     if (abs(ratio - 1f) > ZOOM_NOISE_RATIO) {
                                         val target = (scale * ratio).coerceIn(1f, MAX_ZOOM)
                                         if (target != scale) {
-                                            // anclaje: el punto bajo los dedos se queda quieto
+                                            // anclaje: el punto donde se posaron los dedos se queda
+                                            // quieto (ancla FIJA, no el centroide vivo)
                                             val k = target / scale
                                             val no = ZoomMath.anchoredOffset(
-                                                Offset(offsetX, offsetY), k, c, anchorBase
+                                                Offset(offsetX, offsetY), k, pinchAnchor, anchorBase
                                             )
                                             offsetX = no.x
                                             offsetY = no.y
                                             scale = target
+                                            // TEMPORAL (diagnóstico del S6 Lite, sin overlay).
+                                            // Invariante REAL: pinchFit0 se capturó al posarse los
+                                            // dedos y NO se recalcula, así que "sale" es dónde acaba
+                                            // de verdad ese punto de la partitura. Si se aleja del
+                                            // ancla, algo lo ha movido (un paneo, un re-anclaje).
+                                            val drawn = anchorBase + Offset(offsetX, offsetY) + pinchFit0 * scale
+                                            Log.d(
+                                                LOG_TAG,
+                                                "ZOOM k=${f1(scale)} off=${f1(offsetX)},${f1(offsetY)} " +
+                                                    "ancla=${f1(pinchAnchor.x)},${f1(pinchAnchor.y)} " +
+                                                    "sale=${f1(drawn.x)},${f1(drawn.y)} " +
+                                                    "residuo=${f1((drawn - pinchAnchor).getDistance())}"
+                                            )
                                         }
                                     }
                                 }
-                                // y seguimos a los dedos si los dos se mueven juntos
-                                offsetX += delta.x
-                                offsetY += delta.y
+                                // ponytail: SIN pan de 2 dedos. El foco está clavado al punto del
+                                // primer contacto; seguir el deslizamiento del centroide (offset +=
+                                // delta) arrastraba el punto tocado y el usuario veía "no amplía
+                                // donde quiero". Para mover la página, levantar un dedo y arrastrar
+                                // (rama de 1 dedo de abajo) o mover los dedos con el zoom ya hecho.
                             } else if (scale > 1f && delta.getDistance() > 0f) {
                                 // un solo dedo: pan (el escalado ya lo lleva el caso de arriba)
                                 isTransform = true
@@ -1050,8 +1147,20 @@ fun PdfViewerScreen(
                                 // velocidad suavizada, para la inercia al soltar
                                 val nowMs = System.currentTimeMillis()
                                 val dt = (nowMs - lastPanMs).coerceAtLeast(1L) / 1000f
-                                if (dt < 0.2f) panVel = panVel * 0.7f + (delta / dt) * 0.3f
+                                // tras un pellizco el dedo que queda se resbala al soltar: eso no
+                                // es un arrastre del usuario, es ruido, y era lo que movía la
+                                // página después del zoom
+                                if (dt < 0.2f && !sawMultiTouch) panVel = panVel * 0.7f + (delta / dt) * 0.3f
                                 lastPanMs = nowMs
+                                // TEMPORAL: un pan grande es un salto de página. Sale en el log si
+                                // el desplazamiento no viene de un arrastre del dedo.
+                                if (delta.getDistance() > 60f) {
+                                    Log.d(
+                                        LOG_TAG,
+                                        "PAN salto delta=${f1(delta.x)},${f1(delta.y)} " +
+                                            "off=${f1(offsetX)},${f1(offsetY)} multi=$sawMultiTouch"
+                                    )
+                                }
                             }
                             clampOffsets()
                             prevCentroid = c
@@ -1124,18 +1233,36 @@ fun PdfViewerScreen(
                         val k = scale
                         val posX = pageFit.left + offsetX
                         val posY = pageFit.top + offsetY
-                        Box(modifier = Modifier.fillMaxSize().then(gestureMod)) {
+                        // clipToBounds: sin esto la página ampliada (caja de 3000x3922) se dibuja
+                        // fuera del viewport y PISA las barras de la app (se veía en el S6 Lite:
+                        // al ampliar desaparecían la barra de modo y la de página).
+                        Box(modifier = Modifier.fillMaxSize().clipToBounds().then(gestureMod)) {
                             Image(
                                 bitmap = bmp.asImageBitmap(),
                                 contentDescription = "Page ${currentPage + 1} of $pageCount",
                                 contentScale = ContentScale.FillBounds,
                                 colorFilter = if (invert) INVERT_FILTER else null,
                                 modifier = Modifier
-                                    .offset { IntOffset(posX.roundToInt(), posY.roundToInt()) }
-                                    .size(
+                                    // ponytail: size() coerciona el tamaño a los constraints del padre
+                                    // (el Box fillMaxSize del viewport) y, al desbordar la caja con el
+                                    // zoom, FillBounds estiraba el bitmap al aspecto del viewport (0.6)
+                                    // en vez del de la página (0.765) → estiramiento vertical ~27% a
+                                    // k>1.28. requiredSize ignora los constraints del padre: la caja
+                                    // crece de verdad y el aspecto de la página se conserva.
+                                    .requiredSize(
                                         with(density) { (pageFit.width * k).toDp() },
                                         with(density) { (pageFit.height * k).toDp() }
                                     )
+                                    // La POSICIÓN va por graphicsLayer (transform de DIBUJO), no por
+                                    // Modifier.offset (que va por LAYOUT). Con offset la página se
+                                    // colocaba en un sitio distinto del que dice el modelo: el
+                                    // contenido se iba de debajo de los dedos mientras la tinta y los
+                                    // stamps (Canvas + withTransform, que sí es transform de dibujo)
+                                    // se quedaban donde debían y parecían deslizarse de la música.
+                                    .graphicsLayer {
+                                        translationX = posX
+                                        translationY = posY
+                                    }
                             )
                             if (canEdit) {
                                 // por defecto tinta/sellos en negro (no el primary azulado del tema)
@@ -1566,5 +1693,6 @@ fun PdfViewerScreen(
                 }
             }
         }
+
     }
 }
