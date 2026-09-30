@@ -56,7 +56,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.ColorMatrix
-import androidx.compose.ui.graphics.FilterQuality
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
@@ -105,8 +105,16 @@ private const val LOG_TAG = "FOSScore-PDF"
 // zona muerta el zoom no reacciona al ruido (si no, el contenido "respira" y parece que tiembla).
 private const val ZOOM_NOISE_RATIO = 0.004f
 
-// zoom al que salta el doble toque (2.5x: legible sin perder el contexto de la página)
+// Zoom al que salta el doble toque (2.5x: legible sin perder el contexto de la página).
 private const val DOUBLE_TAP_ZOOM = 2.5f
+
+// Tope de zoom. Los visores de referencia (AndroidPdfViewer, vfr/Viewer, GrapheneOS) NO escalan
+// la página con un transform: la re-renderizan al zoom actual, así que la GPU nunca reescala la
+// textura. Nuestro capa sí la escala, y por eso hay que acotar: con MAX_RENDER_PIXELS = 4M y una
+// página que encaja en ~1,6M px, el máximo que MuPDF puede entregar sin reescalar es ~2.5x.
+// Más allá la GPU ampliada con vecino más cercano = "cocer". Súbelo solo si además subes el
+// presupuesto de pixels de MuPdfDoc.
+private const val MAX_ZOOM = 2.5f
 
 // estado del gesto "estirar un tirador": qué objeto se escala desde qué esquina
 private sealed interface Resizing {
@@ -499,14 +507,17 @@ fun PdfViewerScreen(
                     scaleY = scale
                     translationX = offsetX
                     translationY = offsetY
-                    // Sin esto Compose escala la textura con "vecino más cercano" en los
-                    // ampliados grandes y la imagen "cuece" al hacer zoom (el conocido jittery
-                    // scale animations; ver halilibo.com/2024/why-text-gets-jittery-when-scaled-
-                    // on-android). Low = bilineal: suaviza el reescalado de la GPU.
-                    // NO usamos compositingStrategy = Offscreen (el otro remedio del artículo)
-                    // porque rasteriza el contenido y lo escala como imagen: más suave, pero con
-                    // blur justo donde MuPDF nos da la nitidez que buscamos.
-                    filterQuality = FilterQuality.Low
+                    // El "cocer" al ampliar viene de que Compose NO re-rasteriza la capa: escala la
+                    // textura y en ampliados grandes muestrea con vecino más cercano. El remedio
+                    // documentado (halilibo.com/2024/why-text-gets-jittery-when-scaled-on-android)
+                    // es forzar una capa offscreen: el contenido se rasteriza y se escala como
+                    // imagen, y el escalado pasa a ser "much much smoother".
+                    // TRADE-OFF: rasterizar cuesta nitidez cuando el scale es grande (borrosa).
+                    // Por eso es una línea: si lo ves borroso, quítala; el arreglo sin coste de
+                    // nitidez es renderizar el recuadro visible a la resolución exacta (tiles).
+                    // Nota: filterQuality no existe en Compose 1.10 (comprobado en el AAR), así que
+                    // no hay forma de pedir solo el muestreo bilineal.
+                    compositingStrategy = CompositingStrategy.Offscreen
                 }
                 .pointerInput(Unit) {
                     awaitEachGesture {
@@ -960,7 +971,7 @@ fun PdfViewerScreen(
                                     anchorDist = d   // el siguiente frame mide contra esta distancia
                                     // zona muerta contra el ruido del táctil (±1 px, dedos quietos)
                                     if (abs(ratio - 1f) > ZOOM_NOISE_RATIO) {
-                                        val target = (scale * ratio).coerceIn(1f, 5f)
+                                        val target = (scale * ratio).coerceIn(1f, MAX_ZOOM)
                                         if (target != scale) {
                                             // anclaje: el punto bajo los dedos se queda quieto
                                             val k = target / scale
