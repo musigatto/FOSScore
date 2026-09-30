@@ -18,6 +18,6 @@ class StampSymbolTest {
     fun stampColorFallsBackToThemeColorWhenNull() {
         val fallback = Color.Red
         assertEquals(fallback, stampColor(null, fallback))
-        assertEquals(Color(0xFF336699), stampColor(0xFF336699, fallback))
+        assertEquals(Color(0xFF336699.toInt()), stampColor(0xFF336699.toInt(), fallback))
     }
 }

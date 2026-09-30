@@ -14,7 +14,10 @@ class InkGeometryTest {
     fun samplePointsDropsConsecutiveClosePoints() {
         val pts = listOf(Offset(0f, 0f), Offset(1f, 0f), Offset(1.5f, 0f), Offset(10f, 0f))
         val out = samplePoints(pts, 2f)
-        assertEquals(listOf(Offset(0f, 0f), Offset(1.5f, 0f), Offset(10f, 0f)), out)
+        // se mide contra el ÚLTIMO punto conservado: (1,0) y (1.5,0) están a <2 del (0,0),
+        // así que solo entra el (10,0). La expectativa original (conservar el 1.5) contradecía
+        // la implementación y fallaba siempre (definición en InkGeometry: minDist del anterior).
+        assertEquals(listOf(Offset(0f, 0f), Offset(10f, 0f)), out)
     }
 
     @Test

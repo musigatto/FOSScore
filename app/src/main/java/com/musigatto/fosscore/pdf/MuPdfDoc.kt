@@ -80,6 +80,12 @@ class MuPdfDoc private constructor(
     fun pageSize(index: Int): PageBox? = sizes[index]
 
     /**
+     * Igual que [pageSize] pero, si el tamaño aún no está cargado (páginas más allá del preload),
+     * lo carga ahora. Como toca MuPDF ([loadSize]), llamar dentro del Mutex de render del visor.
+     */
+    fun ensurePageSize(index: Int): PageBox? = sizes[index] ?: loadSize(index)
+
+    /**
      * Rasteriza la página al tamaño pedido (px), respetando [MAX_RENDER_PIXELS].
      * Devuelve el bitmap cacheado si esa resolución ya se renderizó.
      */
