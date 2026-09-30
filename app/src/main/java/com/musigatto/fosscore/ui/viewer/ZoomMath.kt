@@ -27,9 +27,8 @@ object ZoomMath {
 
     /**
      * Rango del paneo: el contenido (de tamaño [content] en pantalla a escala 1) ampliado por
-     * [scale] no puede despegarse del viewport. Si cabe, se bloquea centrado; si desborda, se
-     * acota el offset entre las dos posiciones en las que una arista del contenido toca el
-     * borde opuesto del viewport.
+     * [scale] para que siga tocando el viewport — rango único y continuo (sin saltos al cruzar
+     * de no-desbordar a desbordar). A escala 1 (vista completa) queda centrado.
      */
     fun clampOffset(offset: Offset, content: Size, viewport: Size, scale: Float, base: Offset): Offset =
         Offset(
@@ -38,10 +37,16 @@ object ZoomMath {
         )
 
     private fun clampAxis(o: Float, content: Float, viewport: Float, scale: Float, base: Float): Float {
-        if (content * scale <= viewport) return content * (1f - scale) / 2f
-        val min = viewport - content * scale - base
-        val max = -base
-        return o.coerceIn(min, max)
+        // Sin zoom la vista es "página completa": siempre centrada.
+        if (scale <= 1f) return 0f
+        // Rango único y CONTINUO (sin salto al cruzar de no-desbordar a desbordar): la página
+        // puede deslizarse mientras siga tocando el viewport. El anclaje del pellizco nunca se
+        // traiciona (si el eje cabe y se fuerza el centro, la página crece desde el centro y el
+        // punto de los dedos huye hacia la esquina). El precio: al desbordar, un paneo puede
+        // dejar la página un poco fuera por un lado — si molesta, upgrade: clamp de cobertura
+        // total al soltar el gesto.
+        val scaled = content * scale
+        return o.coerceIn(-scaled - base, viewport - base)
     }
 
     /**
