@@ -587,6 +587,7 @@ fun PdfViewerScreen(
                         // pageFit.left/top); los modos de lectura escalan el viewport entero (origen 0)
                         val anchorBase = if (currentSpread) Offset.Zero else currentBase
                         var ids = setOf(down.id)
+                        var prevCount = 1
                         var prevCentroid = down.position
                         var anchorDist = 0f
                         // FOCO del pellizco: posición de pantalla donde se han posado los dedos.
@@ -1057,16 +1058,17 @@ fun PdfViewerScreen(
                             }
 
                             val nids = pressed.map { it.id }.toSet()
-                            if (nids != ids) {
-                                // TEMPORAL: al cambiar el nº de dedos el centroide salta media
-                                // separación de dedos. Aquí se re-ancila (delta=0); si ese salto se
-                                // colara como pan, la página se teletransportaba ±215 px al soltar
-                                // un dedo del pellizco.
-                                Log.d(
-                                    LOG_TAG,
-                                    "DEDOS ${ids.size}->${nids.size} c=${f1(centroid(pressed).x)}," +
-                                        "${f1(centroid(pressed).y)} off=${f1(offsetX)},${f1(offsetY)}"
-                                )
+                            // Re-ancla si cambia el CONJUNTO de dedos O su NUMERO. Comparar solo el
+                            // set dejaba pasar el 1 -> 2 -> 1: al volver a un dedo, nids volvia a ser
+                            // ids, no se re-anclaba y prevCentroid se quedaba en el punto medio de
+                            // los dos. Entonces delta valia MEDIA SEPARACION de los dedos y la
+                            // pagina se teletransportaba +-215 px al soltar un dedo del pellizco
+                            // (medido en el S6 Lite: off.y de -823 a -609 con k=1.8 constante).
+                            // La referencia de Compose (detectTransformGestures) no guarda centroide
+                            // entre eventos: deriva el pan de previousPosition() por puntero, asi
+                            // que el cambio de conjunto lo resuelve por construccion.
+                            if (nids != ids || nids.size != prevCount) {
+                                prevCount = nids.size
                                 ids = nids
                                 anchorDist = 0f      // se reancla al cambiar el nº de dedos
                                 prevCentroid = centroid(pressed)
@@ -1318,24 +1320,47 @@ fun PdfViewerScreen(
                                         }
                                     }
                                 }
-                                for (stamp in pageStamps) {
-                                    val shown = dragStamp?.takeIf { it.id == stamp.id } ?: stamp
-                                    val sym = runCatching { StampSymbol.valueOf(shown.symbol) }.getOrNull()
-                                        ?: continue
-                                    val r = stampRect(shown, hitFit)
-                                    StampView(
-                                        symbol = sym,
-                                        sizePx = r.width * k,
-                                        color = stampColor(shown.color, Color.Black),
-                                        modifier = Modifier
-                                            .offset {
-                                                IntOffset(
-                                                    (posX + r.left * k).roundToInt(),
-                                                    (posY + r.top * k).roundToInt()
+                                // Stamps: MISMO transform que la pagina y la tinta (translate+scale
+                                // desde el origen) pero en la ruta de DIBUJO. Antes iban por la ruta
+                                // de LAYOUT (Modifier.offset + Modifier.size), o sea dos
+                                // mecanismos para la misma transformacion: por eso stamps y musica
+                                // se separaban al ampliar. size() es ademas el mismo modificador que
+                                // rompio la pagina en la ronda 4 (hizo falta requiredSize alli).
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .graphicsLayer {
+                                            // obligatorio: por defecto el origen es el CENTRO y la
+                                            // escala se aplicaria desde ahi, moviendo todo
+                                            transformOrigin = TransformOrigin(0f, 0f)
+                                            translationX = posX
+                                            translationY = posY
+                                            scaleX = k
+                                            scaleY = k
+                                            // sin compositingStrategy: asi la escala es transform de
+                                            // canvas y los glifos se re-rasterizan nitidos. Con
+                                            // Offscreen se rasteriza a bitmap y se escala eso (borroso)
+                                        }
+                                ) {
+                                    for (stamp in pageStamps) {
+                                        val shown = dragStamp?.takeIf { it.id == stamp.id } ?: stamp
+                                        val sym = runCatching { StampSymbol.valueOf(shown.symbol) }.getOrNull()
+                                            ?: continue
+                                        val r = stampRect(shown, hitFit)
+                                        StampView(
+                                            symbol = sym,
+                                            // en unidades de encaje: la escala la pone la capa, no el
+                                            // tamano del sello (asi no se duplica)
+                                            sizePx = r.width,
+                                            color = stampColor(shown.color, Color.Black),
+                                            modifier = Modifier
+                                                .offset { IntOffset(r.left.roundToInt(), r.top.roundToInt()) }
+                                                .requiredSize(
+                                                    with(density) { r.width.toDp() },
+                                                    with(density) { r.height.toDp() }
                                                 )
-                                            }
-                                            .size(with(density) { (r.width * k).toDp() })
-                                    )
+                                        )
+                                    }
                                 }
                                 // recuadro de selección POR ENCIMA de todo: si no, los tiradores
                                 // quedan tapados por el propio sello que se está editando
