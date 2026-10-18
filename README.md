@@ -1,46 +1,65 @@
 # FOSScore
 
-> Lector de partituras FOSS para Android.
-> Inspirado en una app de iOS similar, pero libre y sin anuncios.
+> FOSS sheet music reader for Android.
+> Inspired by a similar iOS app, but free software and with no ads.
 
 ## Features
 
-- [ ] **Visor PDF** optimizado para partituras (MuPDF) — retrato, paisaje, two-up, half-page turns
-- [ ] **Reflow** — detección automática de sistemas musicales para visualización tipo teleprompter horizontal
-- [ ] **Biblioteca con metadatos** — compositor, género, tonalidad, dificultad, duración, etiquetas, valoración
-- [ ] **Búsqueda y filtros** — browsing dinámico sin carpetas
-- [ ] **Setlists** — agrupa partituras para tocarlas en orden, con navegación entre archivos
-- [ ] **Anotaciones** — dibujo, texto, sellos musicales, capas múltiples. Soporte para stylus (S Pen, etc.)
-- [ ] **Pistas de audio** — asocia audio a cada partitura, ajusta velocidad/tono, loop, cambio de página automático
-- [ ] **Herramientas integradas** — metrónomo, afinador, diapasón, piano virtual
-- [ ] **MIDI / Bluetooth** — pedales de cambio de página (PageFlip, AirTurn, etc.)
-- [ ] **Marcadores y banderas** — navegación rápida dentro de archivos largos
-- [ ] **Enlaces y botones** — repeticiones, acciones programables en la página
-- [ ] **Reordenar páginas** — insertar, duplicar, eliminar, dividir archivos
-- [ ] **Tema oscuro** — modo claro/oscuro/automático, atenuado de página para poca luz
-- [ ] **100 % offline first** — tu música siempre contigo
-- [ ] **Sin telemetría, sin anuncios, sin cuentas obligatorias**
+Done:
+
+- [x] **PDF viewer** tuned for sheet music (MuPDF) — portrait, landscape, two-up, half-page turns, zoom/pan anchored on the midpoint, animated double tap
+- [x] **Library with metadata** — composer, genre, key, tags
+- [x] **Ink annotations exportable into the PDF** (`/Annots` ink, 💾PDF button in edit mode)
+- [x] **Dark theme** — light/dark/auto, page dimming, negative mode for OLED
+
+Pending (detailed roadmap in the GitHub issues):
+
+- [ ] **Reflow** — detect the music systems and show them as a horizontal teleprompter
+- [ ] **Search and filters** — dynamic browsing, no folders
+- [ ] **Setlists** — group scores to play them in order, with navigation across files
+- [ ] **Stamps and text** — musical stamps into `/Annots` too, text notes
+- [ ] **Audio tracks** — attach audio to each score, adjust speed/pitch, loop, automatic page turns
+- [ ] **Built-in tools** — metronome, tuner, pitch pipe, virtual piano
+- [ ] **MIDI / Bluetooth** — page turner pedals (PageFlip, AirTurn, etc.)
+- [ ] **Bookmarks and flags** — quick navigation inside long files
+- [ ] **Links and buttons** — repeats, programmable actions on the page
+- [ ] **Reorder pages** — insert, duplicate, delete, split files
+- [ ] **Performance mode, practice dashboard**
+- [ ] **100% offline first** — your music always with you
+- [ ] **No telemetry, no ads, no mandatory accounts**
+
+## Compatibility
+
+- Android 6.0+ (minSdk 23), including old 32-bit tablets (`armeabi-v7a`).
+- 100% offline: no accounts, no telemetry, no ads.
 
 ## Stack
 
-- **Lenguaje:** Kotlin
+- **Language:** Kotlin
 - **UI:** Jetpack Compose + Material 3
-- **Renderizado PDF:** MuPDF (`com.artifex.mupdf:fitz`, AAR prebuilt con el JNI; no hace falta NDK)
-- **Base de datos:** Room (SQLite)
+- **PDF rendering:** MuPDF (`com.artifex.mupdf:fitz`, prebuilt AAR with the JNI; no NDK needed)
+- **Database:** Room (SQLite)
 - **Audio:** ExoPlayer / Media3
-- **MIDI:** framework MIDI de Android
+- **MIDI:** Android MIDI framework
 
-## Licencia
+## License
 
-**AGPL-3.0** (ver [LICENSE](LICENSE)). Copyright (c) 2026 Alberto.
+**AGPL-3.0** (see [LICENSE](LICENSE)). Copyright (c) 2026 musigatto.
 
-FOSScore enlaza **MuPDF**, que es AGPL-3.0: la obra combinada tiene que distribuirse bajo AGPL.
-Consecuencias prácticas:
+FOSScore links **MuPDF**, which is AGPL-3.0, so the combined work must be distributed under the
+AGPL. In practice:
 
-- El código fuente completo de la app es público.
-- No podemos usar librerías propietarias de Google (Play Services, AdMob, Crashlytics, ML Kit).
-- Para usar esto en software cerrado hay que comprar la licencia comercial a Artifex.
+- The complete source code of the app is public.
+- Google's proprietary libraries (Play Services, AdMob, Crashlytics, ML Kit) cannot be used, so no
+  ads, no telemetry.
+- Shipping this inside closed-source software would need a commercial MuPDF licence from Artifex.
 
-## Estado
+## Status
 
-En desarrollo temprano. PRs, issues y sugerencias bienvenidas.
+Early development. `dev` is the integration branch; `main` is always installable.
+
+## Contributing
+
+- Work on `dev`, with small, independent PRs (one idea per PR).
+- Every push to `dev`/`main` runs CI: `assembleDebug` + `lintDebug` + `testDebugUnitTest`.
+- PRs, issues and suggestions are welcome.
