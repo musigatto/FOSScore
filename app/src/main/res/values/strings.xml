@@ -1,3 +1,62 @@
 <resources>
-    <string name="app_name">FOSScore</string>
+    <!-- Default language: English (system locale picks values-es/ on Spanish devices) -->
+    <string name="app_name" translatable="false">FOSScore</string>
+    <string name="action_back">Back</string>
+    <string name="action_edit">Edit</string>
+    <string name="action_open">Open</string>
+    <string name="action_import">Import</string>
+    <string name="action_save">Save</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="search_label">Search</string>
+    <string name="library_title">Library</string>
+    <string name="empty_library">No sheets yet. Import one with the Import button.</string>
+    <string name="no_results">No results for \'%1$s\'</string>
+    <string name="edit_sheet_title">Edit sheet</string>    <string name="field_title">Title</string>
+    <string name="field_composer">Composer</string>
+    <string name="field_genre">Genre</string>
+    <string name="field_key">Key</string>
+    <string name="field_tags">Tags</string>
+    <string name="mode_label">Mode:</string>
+    <string name="neg_label">Neg</string>
+    <string name="dim_label">Dim</string>    <string name="thickness_label">Thickness</string>
+    <string name="size_label">Size</string>
+    <string name="theme_auto">Auto</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="delete_sheet_title">Delete this sheet?</string>
+    <string name="delete_sheet_text">It will be removed from the library and the device.</string>
+    <string name="sheet_already_in_library">That sheet is already in the library</string>
+    <string name="desc_page">Page %1$d of %2$d</string>
+    <string name="err_open_file">Could not open the file</string>
+    <string name="err_file_unreadable">The file could not be read</string>
+    <string name="err_import_failed">Import failed</string>
+    <string name="err_invalid_pdf">Invalid or corrupt PDF</string>
+    <string name="err_render_page">Could not render the page</string>
+    <string name="err_no_local_file">Sheet has no local file</string>
+    <string name="err_no_ink">No ink to save</string>
+    <string name="err_pdf_not_editable">The PDF cannot be edited</string>
+    <string name="err_replace_failed">Could not replace the PDF</string>
+    <string name="err_export_failed">Could not save into the PDF</string>
+
+    <!-- Names spoken by screen readers (stamp palette) -->
+    <string name="stamp_pp">Pianissimo (pp)</string>
+    <string name="stamp_p">Piano (p)</string>
+    <string name="stamp_mp">Mezzo-piano (mp)</string>
+    <string name="stamp_mf">Mezzo-forte (mf)</string>
+    <string name="stamp_f">Forte (f)</string>
+    <string name="stamp_ff">Fortissimo (ff)</string>
+    <string name="stamp_cresc">Crescendo</string>
+    <string name="stamp_decresc">Decrescendo</string>
+    <string name="stamp_upbow">Up bow</string>
+    <string name="stamp_downbow">Down bow</string>
+    <string name="stamp_accent">Accent</string>
+    <string name="stamp_staccato">Staccato</string>
+    <string name="stamp_tenuto">Tenuto</string>
+    <string name="stamp_fermata">Fermata</string>
+    <string name="stamp_sharp">Sharp</string>
+    <string name="stamp_flat">Flat</string>
+    <string name="stamp_natural">Natural</string>
+    <string name="stamp_double_sharp">Double sharp</string>
+    <string name="stamp_double_flat">Double flat</string>
 </resources>

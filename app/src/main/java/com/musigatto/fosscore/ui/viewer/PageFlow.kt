@@ -35,6 +35,6 @@ data class PageFlow(
     fun prev(): PageFlow {
         if (!canPrev) return this
         return if (showHalf && halfTurned) copy(halfTurned = false)
-        else copy(page = (page - (if (showHalf) 1 else step)).coerceAtLeast(0))
+        else copy(page = (page - step).coerceAtLeast(0))
     }
 }

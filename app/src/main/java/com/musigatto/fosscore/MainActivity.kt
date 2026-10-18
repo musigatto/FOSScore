@@ -19,9 +19,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import com.musigatto.fosscore.library.ImportResult
 import com.musigatto.fosscore.library.LibraryRepository
 import com.musigatto.fosscore.library.Sheet
@@ -31,8 +34,8 @@ import com.musigatto.fosscore.ui.theme.FOSScoreTheme
 import com.musigatto.fosscore.ui.viewer.PdfViewerScreen
 import com.musigatto.fosscore.ui.viewer.Settings
 import com.musigatto.fosscore.ui.viewer.ThemeMode
-import java.io.File
 import kotlinx.coroutines.launch
+import java.io.File
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -60,14 +63,48 @@ private sealed interface Screen {
     data class Viewer(val sheet: Sheet) : Screen
 }
 
+// rotating the tablet recreates the Activity: without saving the screen, `screen` went back to
+// Library and the open sheet was closed. The viewer already keeps the current page (rememberSaveable).
+private val ScreenSaver = listSaver<Screen, Any>(
+    save = { s ->
+        when (s) {
+            Screen.Library -> listOf("library")
+            is Screen.Detail -> listOf("detail") + s.sheet.toSaveable()
+            is Screen.Viewer -> listOf("viewer") + s.sheet.toSaveable()
+        }
+    },
+    restore = { v ->
+        when (v[0]) {
+            "detail" -> Screen.Detail(sheetFromSaveable(v.drop(1)))
+            "viewer" -> Screen.Viewer(sheetFromSaveable(v.drop(1)))
+            else -> Screen.Library
+        }
+    }
+)
+
+internal fun Sheet.toSaveable(): List<Any> =
+    listOf(id, fileName, path, hash, title, composer, genre, musicalKey, tags)
+
+internal fun sheetFromSaveable(v: List<Any>) = Sheet(
+    id = v[0] as Long,
+    fileName = v[1] as String,
+    path = v[2] as String,
+    hash = v[3] as String,
+    title = v[4] as String,
+    composer = v[5] as String,
+    genre = v[6] as String,
+    musicalKey = v[7] as String,
+    tags = v[8] as String
+)
+
 @Composable
 private fun FOSScoreNav(
     repository: LibraryRepository,
     themeMode: ThemeMode,
     toggleTheme: () -> Unit
 ) {
-    var screen by remember { mutableStateOf<Screen>(Screen.Library) }
-    var message by remember { mutableStateOf<String?>(null) }
+    var screen by rememberSaveable(stateSaver = ScreenSaver) { mutableStateOf<Screen>(Screen.Library) }
+    var messageRes by remember { mutableStateOf<Int?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -75,8 +112,8 @@ private fun FOSScoreNav(
             scope.launch {
                 when (val result = repository.importSheet(uri)) {
                     is ImportResult.Ok -> screen = Screen.Detail(result.sheet)
-                    is ImportResult.Duplicate -> message = "Esa partitura ya está en la biblioteca"
-                    is ImportResult.Error -> message = result.reason
+                    is ImportResult.Duplicate -> messageRes = R.string.sheet_already_in_library
+                    is ImportResult.Error -> messageRes = result.messageRes
                 }
             }
         }
@@ -105,10 +142,11 @@ private fun FOSScoreNav(
                     onEdit = { screen = Screen.Detail(it) },
                     onImport = { picker.launch(arrayOf("application/pdf")) }
                 )
-                message?.let { msg ->
+                messageRes?.let { res ->
+                    val msg = stringResource(res)
                     LaunchedEffect(msg) {
                         snackbar.showSnackbar(msg)
-                        message = null
+                        messageRes = null
                     }
                 }
             }

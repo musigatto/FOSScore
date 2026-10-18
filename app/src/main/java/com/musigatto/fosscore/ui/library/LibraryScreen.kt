@@ -18,6 +18,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.res.stringResource
+import com.musigatto.fosscore.R
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -46,14 +48,14 @@ fun LibraryScreen(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text("Biblioteca", style = MaterialTheme.typography.headlineSmall)
-            Button(onClick = onImport) { Text("Importar") }
+            Text(stringResource(R.string.library_title), style = MaterialTheme.typography.headlineSmall)
+            Button(onClick = onImport) { Text(stringResource(R.string.action_import)) }
         }
 
         OutlinedTextField(
             value = query,
             onValueChange = { query = it },
-            label = { Text("Buscar") },
+            label = { Text(stringResource(R.string.search_label)) },
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -61,13 +63,13 @@ fun LibraryScreen(
 
         if (sheets.isEmpty()) {
             Text(
-                "Aún no hay partituras. Importa una con el botón Importar.",
+                stringResource(R.string.empty_library),
                 modifier = Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodyLarge
             )
         } else if (visible.isEmpty()) {
             Text(
-                "Sin resultados para '$query'",
+                stringResource(R.string.no_results, query),
                 modifier = Modifier.padding(16.dp),
                 style = MaterialTheme.typography.bodyLarge
             )
@@ -87,9 +89,9 @@ fun LibraryScreen(
                                 Text(sheet.composer, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
-                        Button(onClick = { onEdit(sheet) }) { Text("Editar") }
+                        Button(onClick = { onEdit(sheet) }) { Text(stringResource(R.string.action_edit)) }
                         Spacer(Modifier.width(8.dp))
-                        Button(onClick = { onOpen(sheet) }) { Text("Abrir") }
+                        Button(onClick = { onOpen(sheet) }) { Text(stringResource(R.string.action_open)) }
                     }
                     HorizontalDivider()
                 }

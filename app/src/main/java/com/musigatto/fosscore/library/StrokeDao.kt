@@ -12,6 +12,9 @@ interface StrokeDao {
     @Query("SELECT * FROM strokes WHERE sheetHash = :hash ORDER BY page, id")
     fun observeBySheet(hash: String): Flow<List<Stroke>>
 
+    @Query("SELECT * FROM strokes WHERE sheetHash = :hash ORDER BY page, id")
+    suspend fun listBySheet(hash: String): List<Stroke>
+
     @Insert
     suspend fun insert(stroke: Stroke): Long
 

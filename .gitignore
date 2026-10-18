@@ -1,6 +1,12 @@
 ﻿AGENTS.md
 forscore_features.md
+.superpowers/
+docs/superpowers/
 /build
 .gradle/
 .idea/
+*.iml
+captures/
+.DS_Store
 local.properties
+/.kotlin/

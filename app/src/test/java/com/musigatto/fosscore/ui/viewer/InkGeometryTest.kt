@@ -2,6 +2,7 @@ package com.musigatto.fosscore.ui.viewer
 
 import androidx.compose.ui.geometry.Offset
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 class InkGeometryTest {
     @Test
@@ -18,6 +19,17 @@ class InkGeometryTest {
         // así que solo entra el (10,0). La expectativa original (conservar el 1.5) contradecía
         // la implementación y fallaba siempre (definición en InkGeometry: minDist del anterior).
         assertEquals(listOf(Offset(0f, 0f), Offset(10f, 0f)), out)
+    }
+
+    @Test
+    fun penWidthPxRoundTripsAndClampsToPageRange() {
+        val fit = RectPx(0f, 0f, 750f, 1000f)
+        assertEquals(DEFAULT_PEN_PX, penWidthPxToFrac(DEFAULT_PEN_PX, fit) * fit.height, 1e-4f)
+        // página baja: manda el tope de fracción (2% del alto)
+        assertEquals(MAX_STROKE_WIDTH, penWidthPxToFrac(MAX_PEN_PX, RectPx(0f, 0f, 100f, 300f)), 1e-6f)
+        // alto 0 (aún sin maquetar): el guard evita NaN/Inf y deja el valor en rango
+        val degenerate = penWidthPxToFrac(MIN_PEN_PX, RectPx(0f, 0f, 0f, 0f))
+        assertTrue(degenerate.isFinite() && degenerate in MIN_STROKE_WIDTH..MAX_STROKE_WIDTH)
     }
 
     @Test

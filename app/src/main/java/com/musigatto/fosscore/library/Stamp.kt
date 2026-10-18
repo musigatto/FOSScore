@@ -16,6 +16,6 @@ data class Stamp(
     val x: Float,
     val y: Float,
     val size: Float,
-    // ARGB del color de tinte (null = color del tema), se aplica en el render del overlay
+    // ARGB tint color (null = theme color), applied when the overlay is drawn
     val color: Int? = null
 )

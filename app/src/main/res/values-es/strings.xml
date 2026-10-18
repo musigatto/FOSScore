@@ -1,0 +1,63 @@
+<resources>
+    <!-- Español: se usa automáticamente cuando el sistema está en español -->
+    <string name="action_back">Volver</string>
+    <string name="action_edit">Editar</string>
+    <string name="action_open">Abrir</string>
+    <string name="action_import">Importar</string>
+    <string name="action_save">Guardar</string>
+    <string name="action_delete">Eliminar</string>
+    <string name="action_cancel">Cancelar</string>
+    <string name="search_label">Buscar</string>
+    <string name="library_title">Biblioteca</string>
+    <string name="empty_library">Aún no hay partituras. Importa una con el botón Importar.</string>
+    <string name="no_results">Sin resultados para \'%1$s\'</string>
+    <string name="edit_sheet_title">Editar partitura</string>
+    <string name="field_title">Título</string>
+    <string name="field_composer">Compositor</string>
+    <string name="field_genre">Género</string>
+    <string name="field_key">Tonalidad</string>
+    <string name="field_tags">Etiquetas</string>
+    <string name="mode_label">Modo:</string>
+    <string name="neg_label">Neg</string>
+    <string name="dim_label">Atenuar</string>
+    <string name="thickness_label">Grosor</string>
+    <string name="size_label">Tamaño</string>
+    <string name="theme_auto">Auto</string>
+    <string name="theme_light">Claro</string>
+    <string name="theme_dark">Oscuro</string>
+    <string name="delete_sheet_title">¿Eliminar esta partitura?</string>
+    <string name="delete_sheet_text">Se borrará de la biblioteca y del dispositivo.</string>
+    <string name="sheet_already_in_library">Esa partitura ya está en la biblioteca</string>
+    <string name="desc_page">Página %1$d de %2$d</string>
+    <string name="err_open_file">No se pudo abrir el archivo</string>
+    <string name="err_file_unreadable">El archivo no se pudo leer</string>
+    <string name="err_import_failed">Fallo al importar</string>
+    <string name="err_invalid_pdf">PDF inválido o corrupto</string>
+    <string name="err_render_page">No se pudo renderizar la página</string>
+    <string name="err_no_local_file">Partitura sin archivo local</string>
+    <string name="err_no_ink">No hay tinta que guardar</string>
+    <string name="err_pdf_not_editable">El PDF no se puede editar</string>
+    <string name="err_replace_failed">No se pudo reemplazar el PDF</string>
+    <string name="err_export_failed">No se pudo guardar en el PDF</string>
+
+    <!-- Nombres que lee el lector de pantalla (paleta de sellos) -->
+    <string name="stamp_pp">Pianissimo (pp)</string>
+    <string name="stamp_p">Piano (p)</string>
+    <string name="stamp_mp">Mezzopiano (mp)</string>
+    <string name="stamp_mf">Mezzoforte (mf)</string>
+    <string name="stamp_f">Forte (f)</string>
+    <string name="stamp_ff">Fortissimo (ff)</string>
+    <string name="stamp_cresc">Crescendo</string>
+    <string name="stamp_decresc">Decrescendo</string>
+    <string name="stamp_upbow">Arco arriba</string>
+    <string name="stamp_downbow">Arco abajo</string>
+    <string name="stamp_accent">Acento</string>
+    <string name="stamp_staccato">Staccato</string>
+    <string name="stamp_tenuto">Tenuto</string>
+    <string name="stamp_fermata">Calderón</string>
+    <string name="stamp_sharp">Sostenido</string>
+    <string name="stamp_flat">Bemol</string>
+    <string name="stamp_natural">Becuadro</string>
+    <string name="stamp_double_sharp">Doble sostenido</string>
+    <string name="stamp_double_flat">Doble bemol</string>
+</resources>
