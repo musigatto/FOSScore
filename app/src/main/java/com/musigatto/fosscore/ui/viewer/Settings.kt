@@ -32,6 +32,7 @@ object Settings {
     private const val KEY_INVERT = "invert"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_LAST_PAGE = "last_page_"
+    private const val KEY_STAMP_PX = "stamp_px"
 
     fun themeMode(context: Context): ThemeMode =
         ThemeMode.entries[context.prefs().getInt(KEY_THEME, ThemeMode.SYSTEM.ordinal)]
@@ -65,6 +66,14 @@ object Settings {
 
     fun setLastPage(context: Context, uri: String, page: Int) {
         context.prefs().edit { putInt(KEY_LAST_PAGE + uri, page) }
+    }
+
+    // size the stamp tool starts with, saved from the stamps panel
+    fun stampPx(context: Context): Float =
+        context.prefs().getFloat(KEY_STAMP_PX, DEFAULT_STAMP_PX)
+
+    fun setStampPx(context: Context, px: Float) {
+        context.prefs().edit { putFloat(KEY_STAMP_PX, px.coerceIn(MIN_STAMP_PX, MAX_STAMP_PX)) }
     }
 
     private fun Context.prefs() = getSharedPreferences(PREFS, Context.MODE_PRIVATE)

@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 class StrokeRepository(context: Context) {
     private val dao = AppDatabase.get(context).strokeDao()
 
-    fun observe(hash: String): Flow<List<Stroke>> = dao.observeBySheet(hash)
+    fun observe(hash: String, page: Int): Flow<List<Stroke>> = dao.observePage(hash, page)
 
     suspend fun insert(stroke: Stroke): Long = dao.insert(stroke)
 

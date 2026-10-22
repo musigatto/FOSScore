@@ -1,0 +1,110 @@
+<resources>
+    <!-- Français : utilisé automatiquement quand le système est en français -->
+    <string name="action_back">Retour</string>
+    <string name="action_edit">Modifier</string>
+    <string name="action_open">Ouvrir</string>
+    <string name="action_import">Importer</string>
+    <string name="action_save">Enregistrer</string>
+    <string name="action_delete">Supprimer</string>
+    <string name="action_cancel">Annuler</string>
+    <string name="search_label">Rechercher</string>
+    <string name="library_title">Bibliothèque</string>
+    <string name="empty_library">Aucune partition pour l’instant. Ajoutez-en une avec le bouton Importer.</string>
+    <string name="no_results">Aucun résultat pour « %1$s »</string>
+    <string name="edit_sheet_title">Modifier la partition</string>
+    <string name="field_title">Titre</string>
+    <string name="field_composer">Compositeur</string>
+    <string name="field_genre">Genre</string>
+    <string name="field_key">Tonalité</string>
+    <string name="field_tags">Étiquettes</string>
+    <string name="neg_label">Négatif</string>
+    <string name="dim_label">Atténuer</string>
+    <string name="thickness_label">Épaisseur</string>
+    <string name="size_label">Taille</string>
+    <string name="theme_auto">Auto</string>
+    <string name="theme_light">Clair</string>
+    <string name="theme_dark">Sombre</string>
+    <string name="delete_sheet_title">Supprimer cette partition ?</string>
+    <string name="delete_sheet_text">Elle sera supprimée de la bibliothèque et de l’appareil.</string>
+    <string name="sheet_already_in_library">Cette partition est déjà dans la bibliothèque</string>
+    <string name="desc_page">Page %1$d sur %2$d</string>
+    <string name="err_open_file">Le fichier n’a pas pu être ouvert</string>
+    <string name="err_file_unreadable">Le fichier n’a pas pu être lu</string>
+    <string name="err_import_failed">Échec de l’importation</string>
+    <string name="err_invalid_pdf">PDF invalide ou corrompu</string>
+    <string name="err_render_page">La page n’a pas pu être affichée</string>
+    <string name="err_no_local_file">La partition n’a pas de fichier local</string>
+    <string name="err_no_ink">Aucune encre à enregistrer</string>
+    <string name="err_pdf_not_editable">Ce PDF ne peut pas être modifié</string>
+    <string name="err_replace_failed">Le PDF n’a pas pu être remplacé</string>
+    <string name="err_export_failed">L’enregistrement dans le PDF a échoué</string>
+
+    <!-- Noms lus par les lecteurs d’écran (palette de tampons) -->
+    <string name="stamp_pp">Pianissimo (pp)</string>
+    <string name="stamp_p">Piano (p)</string>
+    <string name="stamp_mp">Mezzo-piano (mp)</string>
+    <string name="stamp_mf">Mezzo-forte (mf)</string>
+    <string name="stamp_f">Forte (f)</string>
+    <string name="stamp_ff">Fortissimo (ff)</string>
+    <string name="stamp_cresc">Crescendo</string>
+    <string name="stamp_decresc">Decrescendo</string>
+    <string name="stamp_upbow">Poussé</string>
+    <string name="stamp_downbow">Tiré</string>
+    <string name="stamp_accent">Accent</string>
+    <string name="stamp_staccato">Staccato</string>
+    <string name="stamp_tenuto">Tenuto</string>
+    <string name="stamp_fermata">Point d’orgue</string>
+    <string name="stamp_sharp">Dièse</string>
+    <string name="stamp_flat">Bémol</string>
+    <string name="stamp_natural">Bécarre</string>
+    <string name="stamp_double_sharp">Double dièse</string>
+    <string name="stamp_double_flat">Double bémol</string>
+    <string name="stamp_ppp">Pianississimo (ppp)</string>
+    <string name="stamp_fff">Fortississimo (fff)</string>
+    <string name="stamp_sfz">Sforzando (sfz)</string>
+    <string name="stamp_trill">Trille</string>
+    <string name="stamp_mordent_up">Mordant supérieur</string>
+    <string name="stamp_mordent_down">Mordant inférieur</string>
+    <string name="stamp_acciaccatura">Acciaccatura</string>
+    <string name="stamp_appoggiatura">Appoggiature</string>
+
+    <!-- Commandes de la visionneuse (options d’affichage) -->
+    <string name="action_close">Fermer</string>
+    <string name="page_section_label">Page</string>
+    <string name="screen_section_label">Écran</string>
+    <string name="half_page_label">Demi-page</string>
+    <string name="one_page_label">Une page</string>
+    <string name="two_pages_label">Deux pages</string>
+    <string name="theme_row_label">Thème</string>
+    <string name="desc_page_range">Pages %1$d-%2$d sur %3$d</string>
+    <string name="display_options_title">Options d’affichage</string>
+    <string name="keep_screen_on_label">Garder l’écran allumé</string>
+
+    <!-- Menu de la bibliothèque : exporter / importer -->
+    <string name="menu_open">Ouvrir le menu</string>
+    <string name="backup_export">Exporter la bibliothèque</string>
+    <string name="backup_import">Importer un export de la bibliothèque</string>
+    <plurals name="backup_exported">
+        <item quantity="one">Bibliothèque exportée : %1$d partition</item>
+        <item quantity="many">Bibliothèque exportée : %1$d partitions</item>
+        <item quantity="other">Bibliothèque exportée : %1$d partitions</item>
+    </plurals>
+    <string name="backup_failed">L\'opération a échoué. Votre bibliothèque n\'a pas changé.</string>
+    <string name="backup_import_title">Importer cette bibliothèque ?</string>
+    <string name="backup_import_replaces">L\'import remplace toute votre bibliothèque. La bibliothèque actuelle est conservée en sauvegarde sur cet appareil. FOSScore redémarre pour terminer.</string>
+    <string name="backup_import_confirm">Importer et redémarrer</string>
+    <string name="backup_cancel">Annuler</string>
+    <string name="backup_check_format_ok">Export de bibliothèque FOSScore</string>
+    <string name="backup_check_format_error">Ce fichier n\'est pas un export de bibliothèque FOSScore, ou il a été fait par une version plus récente de FOSScore.</string>
+    <string name="backup_check_db_ok">Bibliothèque version %1$d, la même que cette app</string>
+    <string name="backup_check_db_older">Bibliothèque version %1$d, plus ancienne que cette app (%2$d) : elle sera mise à jour après le redémarrage.</string>
+    <string name="backup_check_db_newer">Bibliothèque version %1$d, plus récente que cette app (%2$d) : mettez FOSScore à jour avant de l\'importer.</string>
+    <string name="backup_check_content_ok">Partitions : %1$d · tampons : %2$d · traits d\'encre : %3$d</string>
+    <string name="backup_check_content_error">La base de données de ce fichier est abîmée ou incomplète.</string>
+    <string name="backup_check_age_ok">Exportée le %1$s</string>
+    <string name="backup_check_age_old">Exportée le %1$s : cet export est ancien, les modifications récentes seraient perdues.</string>
+    <string name="backup_check_device_ok">Exportée depuis cet appareil</string>
+    <string name="backup_check_device_other">Exportée depuis un autre appareil (%1$s)</string>
+    <string name="backup_check_files_ok">Tous les PDF sont inclus</string>
+    <string name="backup_check_files_missing">%1$d fichiers PDF manquaient au moment de cet export.</string>
+</resources>

@@ -18,10 +18,6 @@ data class PageFlow(
         else -> page < pageCount - 1
     }
 
-    val label: String
-        get() = if (showTwoUp && page + 1 < pageCount) "${page + 1}-${page + 2} / $pageCount"
-        else "${page + 1} / $pageCount"
-
     fun next(): PageFlow {
         if (!canNext) return this
         return if (showHalf) {
@@ -37,4 +33,14 @@ data class PageFlow(
         return if (showHalf && halfTurned) copy(halfTurned = false)
         else copy(page = (page - step).coerceAtLeast(0))
     }
+}
+
+/**
+ * Pages visible at once, 0-based: [currentPage] alone, or it and the next one in a spread.
+ * `IntRange.EMPTY` while the PDF still has no pages.
+ */
+fun visiblePageRange(currentPage: Int, pageCount: Int, showSpread: Boolean): IntRange = when {
+    pageCount <= 0 -> IntRange.EMPTY
+    showSpread && currentPage + 1 < pageCount -> currentPage..currentPage + 1
+    else -> currentPage..currentPage
 }

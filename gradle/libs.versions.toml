@@ -7,6 +7,10 @@ composeBom = "2026.02.01"
 room = "2.7.2"
 ksp = "2.2.10-2.0.2"
 mupdf = "1.28.5"
+coroutines = "1.10.2"
+orgJson = "20240303"
+androidxTestRunner = "1.6.2"
+androidxTestJunit = "1.2.1"   
 
 [libraries]
 junit = { group = "junit", name = "junit", version.ref = "junit" }
@@ -18,11 +22,18 @@ androidx-compose-material3 = { group = "androidx.compose.material3", name = "mat
 androidx-room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }
 androidx-room-ktx = { group = "androidx.room", name = "room-ktx", version.ref = "room" }
 androidx-room-compiler = { group = "androidx.room", name = "room-compiler", version.ref = "room" }
+androidx-room-testing = { group = "androidx.room", name = "room-testing", version.ref = "room" }
+androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidxTestRunner" }
+androidx-test-junit = { group = "androidx.test.ext", name = "junit", version.ref = "androidxTestJunit" }
 # MuPDF: motor C de PDF con el JNI prebuilt en el propio AAR (no hace falta NDK). AGPL-3.0.
 mupdf-fitz = { group = "com.artifex.mupdf", name = "fitz", version.ref = "mupdf" }
+kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
+# Android ships org.json; plain JVM unit tests need the real implementation.
+org-json = { group = "org.json", name = "json", version.ref = "orgJson" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+android-library = { id = "com.android.library", version.ref = "agp" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 

@@ -38,6 +38,7 @@ Pending (detailed roadmap in the GitHub issues):
 - **Language:** Kotlin
 - **UI:** Jetpack Compose + Material 3
 - **PDF rendering:** MuPDF (`com.artifex.mupdf:fitz`, prebuilt AAR with the JNI; no NDK needed)
+- **MusicXML layout:** Verovio 6.3.0, built from its release source by the `musicxml` module (downloaded by the first build, NDK; see `musicxml/README.md`)
 - **Database:** Room (SQLite)
 - **Audio:** ExoPlayer / Media3
 - **MIDI:** Android MIDI framework
@@ -53,6 +54,21 @@ AGPL. In practice:
 - Google's proprietary libraries (Play Services, AdMob, Crashlytics, ML Kit) cannot be used, so no
   ads, no telemetry.
 - Shipping this inside closed-source software would need a commercial MuPDF licence from Artifex.
+
+### Third-party components
+
+| Component | Used for | License | Source |
+|---|---|---|---|
+| [MuPDF](https://mupdf.com) 1.28.5 (`com.artifex.mupdf:fitz`) | drawing PDF pages, and MusicXML pages from Verovio's SVG | AGPL-3.0 | <https://github.com/ArtifexSoftware/mupdf> |
+| [Verovio](https://www.verovio.org) 6.3.0 | laying out MusicXML scores | LGPL-3.0-or-later | <https://github.com/rism-digital/verovio>, release `version-6.3.0`, unmodified, downloaded by the build into `musicxml/third_party/` |
+| [Leipzig](https://github.com/rism-digital/leipzig) music font | music symbols drawn by Verovio | SIL Open Font License 1.1 | shipped with Verovio (its `fonts/` folder) |
+| [Bravura](https://github.com/steinbergmedia/bravura) music font (Daniel Spreadbury, Steinberg) | stamps in the annotator (fingering, dynamics, articulations, accidentals), and fallback for symbols missing from Leipzig | SIL Open Font License 1.1 | `app/src/main/assets/fonts/bravura.otf`; Verovio's copy ships with Verovio |
+| [Liberation](https://github.com/liberationfonts/liberation-fonts) text font | text in the layout (titles, lyrics) | SIL Open Font License 1.1 | shipped with Verovio |
+
+Verovio is built as its own shared library (`libverovio.so`), which the JNI bridge
+(`libverovio_jni.so`) loads at run time: a modified Verovio can replace it, as the LGPL requires.
+Its full source is the release above. The license texts are in its `COPYING` and `COPYING.LESSER`
+(GPL and LGPL) and on the SIL site (OFL).
 
 ## Status
 

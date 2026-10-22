@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.musigatto.fosscore.R
+import com.musigatto.fosscore.score.PageSource
 import com.artifex.mupdf.fitz.ColorSpace
 import com.artifex.mupdf.fitz.Context
 import com.artifex.mupdf.fitz.DisplayList
@@ -61,8 +62,8 @@ class MuPdfDoc private constructor(
     private val fd: ParcelFileDescriptor,
     private val stream: FdSeekable,
     private val doc: Document
-) {
-    val pageCount: Int = doc.countPages()
+) : PageSource {
+    override val pageCount: Int = doc.countPages()
 
     // read from the main thread (pageSize), written from the render dispatcher
     private val sizes = ConcurrentHashMap<Int, PageBox>()
@@ -82,19 +83,19 @@ class MuPdfDoc private constructor(
      * Page size in points. **Reads memory only** (safe from the main thread): it answers only
      * if the size was loaded up front on open, or the page has been drawn already.
      */
-    fun pageSize(index: Int): PageBox? = sizes[index]
+    override fun pageSize(index: Int): PageBox? = sizes[index]
 
     /**
      * Same as [pageSize], but loads the size now if it is not in yet (pages past the up-front
      * ones). It reaches into MuPDF ([loadSize]), so call it under the viewer's render mutex.
      */
-    fun ensurePageSize(index: Int): PageBox? = sizes[index] ?: loadSize(index)
+    override fun ensurePageSize(index: Int): PageBox? = sizes[index] ?: loadSize(index)
 
     /**
      * Draws the page as a bitmap that fits a [slotW]x[slotH] px hole.
      * It does the fitting itself, so callers do not need to know the page size.
      */
-    fun render(index: Int, slotW: Int, slotH: Int): Bitmap? {
+    override fun render(index: Int, slotW: Int, slotH: Int): Bitmap? {
         val list = lists[index] ?: displayList(index) ?: return null
         // NOTE: the size comes from the DISPLAY LIST, not from page.getBounds(): toDisplayList()
         // applies the page transform (/Rotate and the Y flip), so its bounds are those of the
@@ -220,7 +221,7 @@ class MuPdfDoc private constructor(
     }
 
     /** Frees everything. **Blocking**: call it off the main thread (see FOSScoreApp.applicationScope). */
-    fun close() {
+    override fun close() {
         lists.values.forEach { runCatching { it.destroy() } }
         lists.clear()
         bitmaps.values.forEach { runCatching { it.recycle() } }

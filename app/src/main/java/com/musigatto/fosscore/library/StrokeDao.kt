@@ -9,8 +9,10 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface StrokeDao {
-    @Query("SELECT * FROM strokes WHERE sheetHash = :hash ORDER BY page, id")
-    fun observeBySheet(hash: String): Flow<List<Stroke>>
+    // one page only: the viewer draws one page, and re-reading the whole score on every stroke
+    // made the cost of a stroke grow with the score (index: sheetHash, page)
+    @Query("SELECT * FROM strokes WHERE sheetHash = :hash AND page = :page ORDER BY id")
+    fun observePage(hash: String, page: Int): Flow<List<Stroke>>
 
     @Query("SELECT * FROM strokes WHERE sheetHash = :hash ORDER BY page, id")
     suspend fun listBySheet(hash: String): List<Stroke>

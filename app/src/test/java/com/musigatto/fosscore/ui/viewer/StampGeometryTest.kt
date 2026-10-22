@@ -70,4 +70,16 @@ class StampGeometryTest {
         assertTrue(r.left + r.width / 2f >= fit.left && r.left + r.width / 2f <= fit.left + fit.width)
         assertTrue(r.top + r.height / 2f >= fit.top && r.top + r.height / 2f <= fit.top + fit.height)
     }
+
+    @Test
+    fun stampPxRoundTripsAndClampsToPageRange() {
+        val fit = fitOf(750f, 1000f, 0.75f)
+        val frac = stampSizePxToFrac(DEFAULT_STAMP_PX, fit)
+        assertEquals(DEFAULT_STAMP_PX, stampSizeFracToPx(frac, fit), 1e-3f)
+        // what draws and what measures share one fraction: the slider cannot lie
+        assertEquals(frac, stampRect(stamp(0.5f, 0.5f, frac), fit).width / fit.height, 1e-6f)
+        // height 0 (not laid out yet): the guard avoids NaN/Inf and keeps the value in range
+        val degenerate = stampSizePxToFrac(DEFAULT_STAMP_PX, RectPx(0f, 0f, 0f, 0f))
+        assertTrue(degenerate.isFinite() && degenerate in MIN_STAMP_SIZE..MAX_STAMP_SIZE)
+    }
 }

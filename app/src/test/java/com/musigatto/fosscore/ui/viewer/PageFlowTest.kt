@@ -80,4 +80,30 @@ class PageFlowTest {
         assertFalse(f.showTwoUp)
         assertTrue(f.showHalf)
     }
+
+    @Test
+    fun visiblePageRange_paginaSuelta() {
+        assertEquals(0..0, visiblePageRange(currentPage = 0, pageCount = 9, showSpread = false))
+    }
+
+    @Test
+    fun visiblePageRange_spread() {
+        assertEquals(2..3, visiblePageRange(currentPage = 2, pageCount = 9, showSpread = true))
+    }
+
+    @Test
+    fun visiblePageRange_ultimaImparColapsa() {
+        // 9 páginas: en la 9ª (índice 8) no hay compañera de spread
+        assertEquals(8..8, visiblePageRange(currentPage = 8, pageCount = 9, showSpread = true))
+    }
+
+    @Test
+    fun visiblePageRange_pdfSinPaginas() {
+        assertEquals(IntRange.EMPTY, visiblePageRange(currentPage = 0, pageCount = 0, showSpread = false))
+    }
+
+    @Test
+    fun visiblePageRange_spreadEnLaPrimera() {
+        assertEquals(0..1, visiblePageRange(currentPage = 0, pageCount = 2, showSpread = true))
+    }
 }

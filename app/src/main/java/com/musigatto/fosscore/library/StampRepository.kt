@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 class StampRepository(context: Context) {
     private val dao = AppDatabase.get(context).stampDao()
 
-    fun observe(hash: String): Flow<List<Stamp>> = dao.observeBySheet(hash)
+    fun observe(hash: String, page: Int): Flow<List<Stamp>> = dao.observePage(hash, page)
 
     suspend fun insert(stamp: Stamp): Long = dao.insert(stamp)
 

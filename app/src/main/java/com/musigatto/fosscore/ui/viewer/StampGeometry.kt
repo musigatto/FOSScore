@@ -1,9 +1,31 @@
 package com.musigatto.fosscore.ui.viewer
 
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import com.musigatto.fosscore.library.Stamp
 import kotlin.math.max
 import kotlin.math.min
+
+// side of the loupe that opens on a long press while a stamp is armed (screen dp, radius)
+const val LOUPE_RADIUS_DP = 58f
+const val LOUPE_MARGIN_DP = 8f
+const val LOUPE_LIFT = 1.9f   // its center sits this many radii above the finger
+
+/**
+ * Center of the loupe for a finger at [finger] (screen px): above it, never closer than [margin] to
+ * the viewport edge, so it stays readable when you annotate the top of the page.
+ */
+fun loupeCenter(
+    finger: Offset,
+    radius: Float,
+    margin: Float,
+    viewport: Size,
+): Offset {
+    val min = radius + margin
+    val x = finger.x.coerceIn(min, max(min, viewport.width - min))
+    val y = (finger.y - radius * LOUPE_LIFT).coerceAtLeast(min)
+    return Offset(x, y)
+}
 
 data class RectPx(
     val left: Float,
@@ -20,11 +42,53 @@ data class RectPx(
         o.x in left..right && o.y >= top && o.y <= bottom
 }
 
-// ponytail: stamp size as a share of the page height (0.015..0.3); a slider of absolute sizes
-// would come when the user asks for one.
-const val MIN_STAMP_SIZE = 0.015f
+// The user picks the stamp side in screen px at zoom 1 (the height of the fitted page), same as the
+// pen width; the fraction is worked out when it is created. The slider stops at 100 px: past that
+// every step is a big jump and the block covers half the page. Stamps already placed keep their
+// stored size (MAX_STAMP_SIZE is unchanged); only the size of new ones is capped.
+const val MIN_STAMP_SIZE = 0.004f
 const val MAX_STAMP_SIZE = 0.3f
-const val DEFAULT_STAMP_SIZE = 0.09f
+
+const val DEFAULT_STAMP_PX = 30f
+const val MIN_STAMP_PX = 8f
+const val MAX_STAMP_PX = 100f
+
+fun stampSizePxToFrac(px: Float, fit: RectPx): Float =
+    (px / max(1f, fit.height)).coerceIn(MIN_STAMP_SIZE, MAX_STAMP_SIZE)
+
+fun stampSizeFracToPx(frac: Float, fit: RectPx): Float = frac * fit.height
+
+/**
+ * Stamps the eraser trail takes with it. The eraser is a circle of [radiusPx] around the trail, so a
+ * stamp counts when the trail passes within that radius of its box — not only when a sample lands
+ * inside it, which made grazing one feel like it was ignored.
+ */
+fun stampsTouched(
+    stamps: List<Stamp>,
+    fit: RectPx,
+    path: List<Offset>,
+    radiusPx: Float,
+): List<Stamp> {
+    if (path.isEmpty()) return emptyList()
+    // The trail is a line, not a row of dots: walk it in small steps so a fast drag cannot jump
+    // over a stamp between two samples. ponytail: 4 px steps; they only fail for a radius under
+    // 4 px, which the eraser panel does not allow (MIN_ERASER_PX is 6).
+    val points = ArrayList<Offset>()
+    for (i in 0 until path.size - 1) {
+        val a = path[i]
+        val b = path[i + 1]
+        val steps = max(1, ((b - a).getDistance() / 4f).toInt())
+        for (s in 0 until steps) points.add(a + (b - a) * (s / steps.toFloat()))
+    }
+    points.add(path.last())
+    return stamps.filter { st ->
+        val r = stampRect(st, fit)
+        points.any { p ->
+            p.x >= r.left - radiusPx && p.x <= r.right + radiusPx &&
+                p.y >= r.top - radiusPx && p.y <= r.bottom + radiusPx
+        }
+    }
+}
 
 fun fitRect(slotW: Float, slotH: Float, aspect: Float): RectPx {
     if (slotW <= 0f || slotH <= 0f || aspect <= 0f) return RectPx(0f, 0f, 0f, 0f)
@@ -54,7 +118,8 @@ fun hitStamp(pos: Offset, stamps: List<Stamp>, fit: RectPx): Stamp? =
     stamps.lastOrNull { stampRect(it, fit).contains(pos) }
 
 // Selection box handles: 4 little squares on the corners, just OUTSIDE the box (as in any
-// editor) so dragging inside still moves it instead of resizing it by mistake.
+// editor) so dragging inside still moves it instead of resizing it by mistake. Strokes use them;
+// stamps are sized with the slider, so they get no handles.
 private const val HANDLE_RADIUS = 0.0045f // little-square radius, as a share of the page height
 private const val HANDLE_HIT_SLOP = 4f   // the touch area is 4x the radius: looks small, grabs well
 

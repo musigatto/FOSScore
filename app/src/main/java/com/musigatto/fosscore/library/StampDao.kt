@@ -9,8 +9,9 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface StampDao {
-    @Query("SELECT * FROM stamps WHERE sheetHash = :hash ORDER BY page, id")
-    fun observeBySheet(hash: String): Flow<List<Stamp>>
+    // one page only: see StrokeDao.observePage
+    @Query("SELECT * FROM stamps WHERE sheetHash = :hash AND page = :page ORDER BY id")
+    fun observePage(hash: String, page: Int): Flow<List<Stamp>>
 
     @Insert
     suspend fun insert(stamp: Stamp): Long

@@ -57,4 +57,9 @@ object ZoomMath {
         val bucket = ceil(scale * 10f) / 10f
         return if (bucket < 1f) 1f else bucket
     }
+
+    /** Pixel slot a single page is drawn into: the viewer and the prefetch must agree on it,
+     *  because MuPdfDoc caches bitmaps by (page, width). */
+    fun renderSlot(fit: RectPx, renderScale: Float): Pair<Int, Int> =
+        Pair((fit.width * renderScale).toInt(), (fit.height * renderScale).toInt())
 }

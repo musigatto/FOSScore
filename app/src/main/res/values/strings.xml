@@ -8,6 +8,11 @@
     <string name="action_save">Save</string>
     <string name="action_delete">Delete</string>
     <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_redo">Redo</string>
+    <string name="tool_pen">Pen</string>
+    <string name="tool_eraser">Eraser</string>
     <string name="search_label">Search</string>
     <string name="library_title">Library</string>
     <string name="empty_library">No sheets yet. Import one with the Import button.</string>
@@ -17,10 +22,17 @@
     <string name="field_genre">Genre</string>
     <string name="field_key">Key</string>
     <string name="field_tags">Tags</string>
-    <string name="mode_label">Mode:</string>
-    <string name="neg_label">Neg</string>
-    <string name="dim_label">Dim</string>    <string name="thickness_label">Thickness</string>
+    <string name="page_section_label">Page</string>
+    <string name="screen_section_label">Screen</string>
+    <string name="half_page_label">Half-page turn</string>
+    <string name="one_page_label">One page</string>
+    <string name="two_pages_label">Two pages</string>
+    <string name="theme_row_label">Theme</string>
+    <string name="neg_label">Negative</string>
+    <string name="dim_label">Dim</string>
+    <string name="thickness_label">Thickness</string>
     <string name="size_label">Size</string>
+    <string name="stamp_default_save">Save as default</string>
     <string name="theme_auto">Auto</string>
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
@@ -28,6 +40,9 @@
     <string name="delete_sheet_text">It will be removed from the library and the device.</string>
     <string name="sheet_already_in_library">That sheet is already in the library</string>
     <string name="desc_page">Page %1$d of %2$d</string>
+    <string name="desc_page_range">Pages %1$d-%2$d of %3$d</string>
+    <string name="display_options_title">Display Options</string>
+    <string name="keep_screen_on_label">Keep screen on</string>
     <string name="err_open_file">Could not open the file</string>
     <string name="err_file_unreadable">The file could not be read</string>
     <string name="err_import_failed">Import failed</string>
@@ -59,4 +74,39 @@
     <string name="stamp_natural">Natural</string>
     <string name="stamp_double_sharp">Double sharp</string>
     <string name="stamp_double_flat">Double flat</string>
+    <string name="stamp_ppp">Pianississimo (ppp)</string>
+    <string name="stamp_fff">Fortississimo (fff)</string>
+    <string name="stamp_sfz">Sforzando (sfz)</string>
+    <string name="stamp_trill">Trill</string>
+    <string name="stamp_mordent_up">Upper mordent</string>
+    <string name="stamp_mordent_down">Lower mordent</string>
+    <string name="stamp_acciaccatura">Acciaccatura</string>
+    <string name="stamp_appoggiatura">Appoggiatura</string>
+
+    <!-- Library menu: export / import -->
+    <string name="menu_open">Open the menu</string>
+    <string name="backup_export">Export the library</string>
+    <string name="backup_import">Import a library export</string>
+    <plurals name="backup_exported">
+        <item quantity="one">Library exported: %1$d sheet</item>
+        <item quantity="other">Library exported: %1$d sheets</item>
+    </plurals>
+    <string name="backup_failed">The operation failed. Your library has not changed.</string>
+    <string name="backup_import_title">Import this library?</string>
+    <string name="backup_import_replaces">Importing replaces your whole library. The current library is kept as a backup on this device. FOSScore restarts to finish.</string>
+    <string name="backup_import_confirm">Import and restart</string>
+    <string name="backup_cancel">Cancel</string>
+    <string name="backup_check_format_ok">FOSScore library export</string>
+    <string name="backup_check_format_error">This file is not a FOSScore library export, or it was made by a newer version of FOSScore.</string>
+    <string name="backup_check_db_ok">Library version %1$d, same as this app</string>
+    <string name="backup_check_db_older">Library version %1$d, older than this app (%2$d): it will be updated after the restart.</string>
+    <string name="backup_check_db_newer">Library version %1$d, newer than this app (%2$d): update FOSScore before importing it.</string>
+    <string name="backup_check_content_ok">Sheets: %1$d · stamps: %2$d · ink strokes: %3$d</string>
+    <string name="backup_check_content_error">The database in this file is damaged or incomplete.</string>
+    <string name="backup_check_age_ok">Exported on %1$s</string>
+    <string name="backup_check_age_old">Exported on %1$s: this export is old, recent changes would be lost.</string>
+    <string name="backup_check_device_ok">Exported from this device</string>
+    <string name="backup_check_device_other">Exported from another device (%1$s)</string>
+    <string name="backup_check_files_ok">All PDF files included</string>
+    <string name="backup_check_files_missing">%1$d PDF files were missing when this export was made.</string>
 </resources>

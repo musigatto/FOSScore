@@ -9,10 +9,21 @@ import org.junit.Test
 class StampSymbolTest {
     @Test
     fun completeSetWithUniqueLabels() {
-        // 14 originales + 5 alteraciones SMuFL
-        assertEquals(19, StampSymbol.entries.size)
-        assertEquals(StampSymbol.entries.size, StampSymbol.entries.map { it.label }.toSet().size)
-        StampSymbol.entries.forEach { assertTrue(it.label.isNotBlank()) }
+        // 27 con nombre traducido + 10 digitaciones que se anuncian con su propio número
+        assertEquals(37, StampSymbol.entries.size)
+        val named = StampSymbol.entries.filter { it.descRes != null }
+        assertEquals(27, named.size)
+        assertEquals(named.size, named.map { it.descRes }.toSet().size)
+
+        // one glyph per stamp, all in SMuFL's private use area (a duplicated code point, or a
+        // decimal that forgot its 0x, draws the wrong symbol in the palette)
+        assertEquals(
+            StampSymbol.entries.size,
+            StampSymbol.entries.map { it.codepoint }.toSet().size
+        )
+        StampSymbol.entries.forEach {
+            assertTrue("U+%04X".format(it.codepoint), it.codepoint in 0xE000..0xF8FF)
+        }
     }
 
     @Test

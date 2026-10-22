@@ -1,0 +1,4 @@
+/build
+/.cxx
+# Verovio's source, downloaded by the build (build.gradle.kts)
+/third_party

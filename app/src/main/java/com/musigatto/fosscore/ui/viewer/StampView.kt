@@ -1,100 +1,90 @@
 package com.musigatto.fosscore.ui.viewer
 
+import android.content.Context
+import android.graphics.Paint
+import android.graphics.Rect
 import android.graphics.Typeface
-import android.os.Build
 import androidx.annotation.StringRes
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.Font
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.musigatto.fosscore.R
+import kotlin.math.roundToInt
 
-// label = the text drawn on the page (only the dynamics use it, and it is notation, so it does
-// not translate); descRes = the name a screen reader speaks, translated in strings.xml
-enum class StampSymbol(val label: String, @param:StringRes val descRes: Int) {
-    PP("pp", R.string.stamp_pp),
-    P("p", R.string.stamp_p),
-    MP("mp", R.string.stamp_mp),
-    MF("mf", R.string.stamp_mf),
-    F("f", R.string.stamp_f),
-    FF("ff", R.string.stamp_ff),
-    CRESC("cresc.", R.string.stamp_cresc),
-    DECRESC("decresc.", R.string.stamp_decresc),
-    UPBOW("upbow", R.string.stamp_upbow),
-    DOWNBOW("downbow", R.string.stamp_downbow),
-    ACCENT("acento", R.string.stamp_accent),
-    STACCATO("staccato", R.string.stamp_staccato),
-    TENUTO("tenuto", R.string.stamp_tenuto),
-    FERMATA("fermata", R.string.stamp_fermata),
-    // Accidentals (sharp, flat, natural, double sharp, double flat): Noto Music carries them at
-    // normal Unicode code points (we checked its character table).
-    SHARP("sostenido", R.string.stamp_sharp),
-    FLAT("bemol", R.string.stamp_flat),
-    NATURAL("becuadro", R.string.stamp_natural),
-    DOUBLE_SHARP("doble sostenido", R.string.stamp_double_sharp),
-    DOUBLE_FLAT("doble bemol", R.string.stamp_double_flat)
+// Stamps are SMuFL code points (U+E000…) drawn from Bravura, the reference font for the standard,
+// so the marks come out the same shape as the ones in the scores.
+// descRes = the name a screen reader speaks, translated in strings.xml; null = say the number.
+enum class StampSymbol(val codepoint: Int, @param:StringRes val descRes: Int?) {
+    PPP(0xE52A, R.string.stamp_ppp),
+    PP(0xE52B, R.string.stamp_pp),
+    P(0xE520, R.string.stamp_p),
+    MP(0xE52C, R.string.stamp_mp),
+    MF(0xE52D, R.string.stamp_mf),
+    F(0xE522, R.string.stamp_f),
+    FF(0xE52F, R.string.stamp_ff),
+    FFF(0xE530, R.string.stamp_fff),
+    // E524 (dynamicSforzando) is only the "s": the whole sfz is dynamicSforzato
+    SFZ(0xE539, R.string.stamp_sfz),
+    CRESC(0xE53E, R.string.stamp_cresc),
+    DECRESC(0xE53F, R.string.stamp_decresc),
+    UPBOW(0xE612, R.string.stamp_upbow),
+    DOWNBOW(0xE610, R.string.stamp_downbow),
+    ACCENT(0xE4A0, R.string.stamp_accent),
+    STACCATO(0xE4A2, R.string.stamp_staccato),
+    TENUTO(0xE4A4, R.string.stamp_tenuto),
+    FERMATA(0xE4C0, R.string.stamp_fermata),
+    SHARP(0xE262, R.string.stamp_sharp),
+    FLAT(0xE260, R.string.stamp_flat),
+    NATURAL(0xE261, R.string.stamp_natural),
+    DOUBLE_SHARP(0xE263, R.string.stamp_double_sharp),
+    DOUBLE_FLAT(0xE264, R.string.stamp_double_flat),
+    TRILL(0xE566, R.string.stamp_trill),
+    // SMuFL has no "inverted mordent": the upper one is ornamentShortTrill (E56C) and the lower
+    // one is ornamentMordent (E56D, the wavy line with the stroke through it)
+    MORDENT_UP(0xE56C, R.string.stamp_mordent_up),
+    MORDENT_DOWN(0xE56D, R.string.stamp_mordent_down),
+    ACCIACCATURA(0xE560, R.string.stamp_acciaccatura),
+    APPOGGIATURA(0xE562, R.string.stamp_appoggiatura),
+    // fingering 6-9 sit apart from 0-5 in SMuFL: 0-5 are ED10-ED15, 6-9 are ED24-ED27
+    FINGERING_0(0xED10, null),
+    FINGERING_1(0xED11, null),
+    FINGERING_2(0xED12, null),
+    FINGERING_3(0xED13, null),
+    FINGERING_4(0xED14, null),
+    FINGERING_5(0xED15, null),
+    FINGERING_6(0xED24, null),
+    FINGERING_7(0xED25, null),
+    FINGERING_8(0xED26, null),
+    FINGERING_9(0xED27, null)
 }
-
-// Noto Music (OFL, third_party/NotoMusic-OFL.txt) carries the accidentals at normal Unicode
-// code points: checked in its character table and eyeballed by drawing them (♭ 266D, ♮ 266E,
-// ♯ 266F, 𝄪 1D12A, 𝄫 1D12B).
-// ponytail: a pure notation font (say Bravura) keeps its glyphs in a private area (U+E000…)
-// and you would have to know the exact code point of each one; Noto Music skips that mapping.
-private val GLYPH_CODEPOINT = mapOf(
-    StampSymbol.FLAT to 0x266D,
-    StampSymbol.NATURAL to 0x266E,
-    StampSymbol.SHARP to 0x266F,
-    StampSymbol.DOUBLE_SHARP to 0x1D12A,
-    StampSymbol.DOUBLE_FLAT to 0x1D12B
-)
-
-// Dynamics: in notation fonts, p / f / mp / mf / ff really are italic serif letters, which is
-// exactly what we draw as text. Spectral Italic (OFL, third_party/Spectral-OFL.txt) looks
-// closer to the weight of real sheet music than the system's Noto Serif Italic, which comes
-// out too heavy.
-private val TEXT_SYMBOLS = setOf(
-    StampSymbol.PP, StampSymbol.P, StampSymbol.MP,
-    StampSymbol.MF, StampSymbol.F, StampSymbol.FF,
-    StampSymbol.CRESC, StampSymbol.DECRESC
-)
-
-private val MUSIC_FONT = FontFamily(Font(R.font.spectral_italic))
-
-// share of the box each label takes up (long words get shrunk)
-private val TEXT_FILL = mapOf(
-    StampSymbol.DECRESC to 0.34f,
-    StampSymbol.CRESC to 0.42f,
-    StampSymbol.MF to 0.5f,
-    StampSymbol.FF to 0.55f,
-    StampSymbol.MP to 0.58f,
-    StampSymbol.PP to 0.58f
-)
 
 // tint colors that read well on light and dark backgrounds
 val SWATCH_COLORS = listOf(
@@ -105,125 +95,57 @@ val SWATCH_COLORS = listOf(
 // null = theme color; otherwise the ARGB that was saved
 fun stampColor(color: Int?, fallback: Color): Color = color?.let(::Color) ?: fallback
 
-@Composable
-private fun musicTypeface(): Typeface? {
-    val resources = LocalResources.current
-    // Resources.getFont is API 26+: on 23-25 we skip it (a NoSuchMethodError is not caught by
-    // catch(Exception)) and the glyphs fall through to the Canvas drawing, which is already
-    // the fallback.
-    return remember {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            null
-        } else {
-            try {
-                resources.getFont(R.font.noto_music)
-            } catch (_: Exception) {
-                null
-            }
-        }
+// Typeface.createFromAsset builds a fresh Typeface on every call and the palette asks for one per
+// symbol (29 of them), so one per process is what keeps the panel from taking a few ms to open.
+private const val BRAVURA_ASSET = "fonts/bravura.otf"
+private var bravuraTypeface: Typeface? = null
+private var bravuraLoaded = false
+
+private fun bravura(context: Context): Typeface? {
+    if (!bravuraLoaded) {
+        bravuraLoaded = true
+        bravuraTypeface = runCatching {
+            Typeface.createFromAsset(context.assets, BRAVURA_ASSET)
+        }.getOrNull()
     }
+    return bravuraTypeface
 }
 
+// A glyph much smaller than the em (the staccato dot is 0.08 em) would balloon to fill the box.
+private const val MAX_ENLARGE = 2f
+
 /**
- * Musical glyphs: Noto Music for the accidentals (real glyphs, measured and centred by their
- * ink box), Spectral Italic for the dynamics, and Canvas for the rest.
+ * Draws a stamp: the glyph from Bravura, measured by its ink box so it lands centred, and grown to
+ * fill the requested size up to [MAX_ENLARGE] times its natural size.
  */
 @Composable
 fun StampView(symbol: StampSymbol, sizePx: Float, color: Color, modifier: Modifier = Modifier) {
-    val density = LocalDensity.current
-    val side = with(density) { sizePx.toDp() }
-    val typeface = musicTypeface()
+    val typeface = bravura(LocalContext.current)
+    val side = with(LocalDensity.current) { sizePx.toDp() }
     Box(modifier, contentAlignment = Alignment.Center) {
-        if (symbol in TEXT_SYMBOLS) {
-            // ponytail: each label is shrunk by a fixed factor (eyeballed against the box)
-            // instead of measuring the text at runtime. Upgrade: Canvas.drawText with a real measure.
-            val maxSp = (sizePx * (TEXT_FILL[symbol] ?: 0.7f) / density.density).sp
-            androidx.compose.material3.Text(
-                text = symbol.label,
-                maxLines = 1,
-                softWrap = false,
-                fontSize = maxSp,
-                fontFamily = MUSIC_FONT,
-                fontStyle = FontStyle.Italic,
-                color = color,
-                textAlign = TextAlign.Center
-            )
-        } else {
-            Canvas(Modifier.size(side)) {
-                val s = size.minDimension
-                val stroke = s * 0.08f
-                val p = Path()
-                val cp = GLYPH_CODEPOINT[symbol]
-
-                if (cp != null && typeface != null) {
-                    // we measure the INK (not the em box) so it scales to the size of the page
-                    // and truly lands centred; Compose's text box shifts symbol glyphs off
-                    // center and also clips them to the line height
-                    val text = String(Character.toChars(cp))
-                    val paint = android.graphics.Paint().apply {
-                        // NOTE: without "this." the left side resolves to the outer val (same
-                        // name) and Kotlin says "'val' cannot be reassigned"
-                        this.typeface = typeface
-                        isAntiAlias = true
-                        this.color = color.toArgb()
-                    }
-                    val b = android.graphics.Rect()
-                    val refPx = 200f
-                    paint.textSize = refPx
-                    paint.getTextBounds(text, 0, text.length, b)
-                    val k = if (b.width() > 0 && b.height() > 0) {
-                        minOf(s * 0.92f / b.width(), s * 0.92f / b.height())
-                    } else 1f
-                    paint.textSize = refPx * k
-                    paint.getTextBounds(text, 0, text.length, b)
-                    // centred on the ink box; the baseline sits below the center
-                    val x = s / 2f - (b.left + b.right) / 2f
-                    val y = s / 2f - (b.top + b.bottom) / 2f + b.bottom
-                    drawIntoCanvas { it.nativeCanvas.drawText(text, x, y, paint) }
-                } else when (symbol) {
-                    StampSymbol.UPBOW -> p.apply {
-                        moveTo(s * 0.08f, s * 0.28f); lineTo(s * 0.5f, s * 0.78f); lineTo(s * 0.92f, s * 0.28f)
-                    }
-                    StampSymbol.DOWNBOW -> p.apply {
-                        moveTo(s * 0.08f, s * 0.78f); lineTo(s * 0.5f, s * 0.18f); lineTo(s * 0.92f, s * 0.78f)
-                    }
-                    StampSymbol.ACCENT -> p.apply {
-                        moveTo(s * 0.05f, s * 0.12f); lineTo(s * 0.88f, s * 0.5f); lineTo(s * 0.05f, s * 0.88f)
-                    }
-                    StampSymbol.STACCATO ->
-                        drawCircle(color, radius = s * 0.14f, center = Offset(s / 2f, s / 2f))
-                    StampSymbol.TENUTO -> drawLine(
-                        color, Offset(s * 0.05f, s / 2f), Offset(s * 0.95f, s / 2f),
-                        strokeWidth = s * 0.15f, cap = StrokeCap.Round
-                    )
-                    StampSymbol.FERMATA -> {
-                        // dome (top half circle) + a dot BELOW: in Android 0° is 3 o'clock and
-                        // angles run clockwise, so 180→360 is the top half. With 0→180 the dome
-                        // came out at the bottom.
-                        drawArc(
-                            color = color, startAngle = 180f, sweepAngle = 180f, useCenter = false,
-                            topLeft = Offset(s * 0.18f, s * 0.16f),
-                            size = androidx.compose.ui.geometry.Size(s * 0.64f, s * 0.64f),
-                            style = androidx.compose.ui.graphics.drawscope.Stroke(
-                                width = stroke, cap = StrokeCap.Round
-                            )
-                        )
-                        drawCircle(color, radius = s * 0.11f, center = Offset(s / 2f, s * 0.72f))
-                    }
-                    else -> {}
-                }
-                // the Path symbols are the ones drawn with neither a glyph nor simple shapes
-                val usesPath = symbol == StampSymbol.UPBOW ||
-                    symbol == StampSymbol.DOWNBOW || symbol == StampSymbol.ACCENT
-                if (usesPath) {
-                    drawPath(
-                        p, color,
-                        style = androidx.compose.ui.graphics.drawscope.Stroke(
-                            width = stroke, cap = StrokeCap.Round
-                        )
-                    )
-                }
+        Canvas(Modifier.size(side)) {
+            val s = size.minDimension
+            if (typeface == null || s <= 0f) return@Canvas
+            val text = String(Character.toChars(symbol.codepoint))
+            val paint = Paint().apply {
+                // NOTE: without "this." the typeface falls back to the outer name
+                this.typeface = typeface
+                isAntiAlias = true
+                this.color = color.toArgb()
             }
+            val box = Rect()
+            // natural size: one em = the stamp box
+            paint.textSize = s
+            paint.getTextBounds(text, 0, text.length, box)
+            val fit = if (box.width() > 0 && box.height() > 0) {
+                minOf(s * 0.92f / box.width(), s * 0.92f / box.height())
+            } else 1f
+            paint.textSize = s * fit.coerceAtMost(MAX_ENLARGE)
+            paint.getTextBounds(text, 0, text.length, box)
+            // centred on the ink box (getTextBounds is relative to the baseline: top is negative)
+            val x = s / 2f - (box.left + box.right) / 2f
+            val y = s / 2f - (box.top + box.bottom) / 2f
+            drawIntoCanvas { it.nativeCanvas.drawText(text, x, y, paint) }
         }
     }
 }
@@ -233,7 +155,7 @@ fun StampPaletteButton(symbol: StampSymbol, selected: Boolean, onClick: () -> Un
     val color = MaterialTheme.colorScheme.primary
     val border = if (selected) 2.dp else 1.dp
     val borderColor = if (selected) color else MaterialTheme.colorScheme.outline
-    val desc = stringResource(symbol.descRes)
+    val desc = symbol.descRes?.let { stringResource(it) } ?: symbol.name.substringAfter('_')
     Surface(
         shape = RoundedCornerShape(6.dp),
         border = BorderStroke(border, borderColor),
@@ -260,5 +182,82 @@ fun ColorSwatchButton(color: Color, selected: Boolean, onClick: () -> Unit) {
         modifier = Modifier.clickable(onClick = onClick)
     ) {
         Box(Modifier.size(28.dp))
+    }
+}
+
+/**
+ * Stamps palette (spec §5): the symbols in a grid, the placement size at the bottom — forScore's
+ * Stamps panel. The bar only carries the tool button; the panel drops from it, stays a compact
+ * block (4 columns, see-through) instead of a band across the page, and steps aside while a finger
+ * is on the page. The grid scrolls once there are more symbols than fit; the size controls stay.
+ */
+@Composable
+fun StampPalettePanel(
+    active: StampSymbol,
+    sizePx: Float,
+    onSymbol: (StampSymbol) -> Unit,
+    onSize: (Float) -> Unit,
+    onSaveDefault: () -> Unit,
+    isDefault: Boolean,
+) {
+    ToolBlock {
+        Column(
+            modifier = Modifier
+                .heightIn(max = 180.dp)
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            StampSymbol.entries.chunked(4).forEach { row ->
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    row.forEach { sym ->
+                        StampPaletteButton(
+                            symbol = sym,
+                            selected = sym == active,
+                            onClick = { onSymbol(sym) }
+                        )
+                    }
+                }
+            }
+        }
+        Text(
+            "${stringResource(R.string.size_label)} · ${sizePx.roundToInt()} px",
+            style = MaterialTheme.typography.bodySmall
+        )
+        // the slider is the coarse control; the arrows step 1 px for the last few
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            StepArrow(label = "−", onClick = { onSize((sizePx - 1f).coerceIn(MIN_STAMP_PX, MAX_STAMP_PX)) })
+            Slider(
+                value = sizePx,
+                onValueChange = onSize,
+                valueRange = MIN_STAMP_PX..MAX_STAMP_PX,
+                steps = (MAX_STAMP_PX - MIN_STAMP_PX).toInt() - 1,
+                modifier = Modifier.weight(1f),
+            )
+            StepArrow(label = "+", onClick = { onSize((sizePx + 1f).coerceIn(MIN_STAMP_PX, MAX_STAMP_PX)) })
+        }
+        // persists in Settings: the next session starts with this size
+        TextButton(
+            onClick = onSaveDefault,
+            enabled = !isDefault,
+            contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp)
+        ) {
+            Text(
+                stringResource(R.string.stamp_default_save),
+                style = MaterialTheme.typography.labelMedium,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/** 1 px step button beside the slider: 32 dp of chrome, no ripple ring stealing the tap. */
+@Composable
+private fun StepArrow(label: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        contentPadding = PaddingValues(0.dp),
+        modifier = Modifier.size(32.dp)
+    ) {
+        Text(label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
     }
 }

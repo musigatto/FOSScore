@@ -10,3 +10,5 @@ captures/
 .DS_Store
 local.properties
 /.kotlin/
+*.txt
+/docs/

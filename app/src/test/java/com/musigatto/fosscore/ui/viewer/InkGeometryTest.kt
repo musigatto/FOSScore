@@ -1,7 +1,9 @@
 package com.musigatto.fosscore.ui.viewer
 
 import androidx.compose.ui.geometry.Offset
+import com.musigatto.fosscore.library.Stroke
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 class InkGeometryTest {
@@ -62,32 +64,57 @@ class InkGeometryTest {
     }
 
     @Test
-    fun briefPenLiftContinuesTheSameWord() {
+    fun onePixelStaysOnePixelOnARealPage() {
+        // the 1 px setting used to be clamped up to MIN_STROKE_WIDTH (0.002 of the page height), so
+        // the stroke got fatter the moment it was committed, while the preview showed 1 px
+        val fit = RectPx(0f, 0f, 900f, 1700f)
+        assertEquals(1f, penWidthPxToFrac(1f, fit) * fit.height, 1e-3f)
+        assertEquals(2f, penWidthPxToFrac(2f, fit) * fit.height, 1e-3f)
+    }
+
+    // letter at x..x+40, y..y+40 in px at a 1000 px fit (the entity stores normalized points)
+    private fun letter(id: Long, x: Float, y: Float = 0f) = Stroke(
+        id = id,
+        sheetHash = "h",
+        page = 0,
+        points = encodePoints(
+            listOf(Offset(x, y), Offset(x, y + 40f), Offset(x + 40f, y))
+                .map { Offset(it.x / 1000f, it.y / 1000f) }
+        ),
+        width = 0.002f
+    )
+
+    @Test
+    fun strokesOfAWordEndUpInOneGroup() {
         val fit = RectPx(0f, 0f, 1000f, 1000f)
-        // el stylus alza 80 ms y sigue en el mismo sitio: mismo trazo
-        assertEquals(
-            true,
-            shouldMergeStroke(Offset(500f, 500f), Offset(505f, 502f), fit, 80L, sameStyle = true)
+        // "hola": 10 px between letters, "mundo" 110 px away, and a second line 160 px below
+        val strokes = listOf(
+            letter(1, 0f), letter(2, 50f), letter(3, 100f), letter(4, 150f),
+            letter(5, 300f), letter(6, 350f), letter(7, 400f),
+            letter(8, 0f, y = 200f)
         )
+        val groups = groupInk(strokes, fit)
+        assertEquals(3, groups.size)
+        val hola = groups.first { g -> g.strokes.any { it.id == 1L } }
+        assertEquals(listOf(1L, 2L, 3L, 4L), hola.strokes.map { it.id })
+        assertTrue(groups.none { g -> g.strokes.any { it.id == 8L } && g.strokes.size > 1 })
     }
 
     @Test
-    fun longPauseOrFarJumpStartsANewStroke() {
+    fun groupingFollowsTheWritingSize() {
         val fit = RectPx(0f, 0f, 1000f, 1000f)
-        // pausa larga: trazo nuevo
-        assertEquals(
-            false,
-            shouldMergeStroke(Offset(500f, 500f), Offset(505f, 502f), fit, 900L, sameStyle = true)
-        )
-        // pausa breve pero en otro sitio: trazo nuevo
-        assertEquals(
-            false,
-            shouldMergeStroke(Offset(500f, 500f), Offset(700f, 500f), fit, 80L, sameStyle = true)
-        )
-        // otro grosor o color: trazo nuevo aunque el dedo no se mueva
-        assertEquals(
-            false,
-            shouldMergeStroke(Offset(500f, 500f), Offset(500f, 500f), fit, 10L, sameStyle = false)
-        )
+        val strokes = listOf(letter(1, 0f), letter(2, 50f), letter(3, 300f))
+        // same page, half the fit: the threshold comes from the strokes, so the groups do not change
+        assertEquals(2, groupInk(strokes, fit).size)
+        assertEquals(2, groupInk(strokes, RectPx(0f, 0f, 500f, 500f)).size)
+    }
+
+    @Test
+    fun tapInsideTheHoleOfAnOStillFindsTheWord() {
+        val fit = RectPx(0f, 0f, 1000f, 1000f)
+        val groups = groupInk(listOf(letter(1, 0f), letter(2, 50f)), fit)
+        val word = groupAt(Offset(70f, 20f), groups, padPx = 6f)
+        assertEquals(listOf(1L, 2L), word?.strokes?.map { it.id })
+        assertNull(groupAt(Offset(700f, 700f), groups, padPx = 6f))
     }
 }
