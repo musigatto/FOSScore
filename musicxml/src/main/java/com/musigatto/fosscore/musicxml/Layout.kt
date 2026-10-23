@@ -71,7 +71,7 @@ internal object VerovioOptions {
     // Verovio's default (1.2) let words touch in narrow measures of real songs.
     private const val LYRIC_WORD_SPACE = 2.5
 
-    // Tempo factors outside this range make no musical sense and stress the MIDI output.
+    // Tempo factors outside this range make no musical sense and stress the MIDI player.
     const val MIN_TEMPO = 0.2
     const val MAX_TEMPO = 4.0
 
@@ -98,9 +98,6 @@ internal object VerovioOptions {
     /** The cheapest layout (one endless system), for a toolkit that is never drawn. */
     fun unpaged(semitones: Int): JSONObject =
         JSONObject().put("transpose", interval(semitones)).put("breaks", "none")
-
-    fun tempo(factor: Double): JSONObject =
-        JSONObject().put("midiTempoAdjustment", factor.coerceIn(MIN_TEMPO, MAX_TEMPO))
 
     private val INTERVALS = listOf("P1", "m2", "M2", "m3", "M3", "P4", "A4", "P5", "m6", "M6", "m7", "M7", "P8")
 

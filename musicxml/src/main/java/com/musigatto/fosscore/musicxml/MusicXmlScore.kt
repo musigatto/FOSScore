@@ -45,6 +45,12 @@ class MusicXmlScore private constructor(private val doc: Document) {
         }
     }
 
+    /**
+     * The number of staves of each part, in the order of the parts in the file: Verovio numbers
+     * the staves in this order, and puts staff n on MIDI track n.
+     */
+    internal val staffCounts: List<Pair<String, Int>> = root.children("part").map { it.getAttribute("id") to it.staves() }
+
     val info: ScoreInfo = readInfo()
 
     /** True when most lyrics of the file ask to be drawn above the staff. */

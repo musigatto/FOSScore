@@ -3,6 +3,7 @@ package com.musigatto.fosscore.ui.viewer
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,11 +48,15 @@ import kotlinx.coroutines.launch
 private const val ICON_PLAY = "M8,5v14l11,-7z"
 private const val ICON_PAUSE = "M6,19h4V5H6v14zM14,5v14h4V5h-4z"
 private const val ICON_TO_START = "M6,6h2v12H6zM9.5,12l8.5,6V6z"
+// Material "tune": the playback options
+private const val ICON_OPTIONS = "M3,17v2h6v-2H3zM3,5v2h10V5H3zM13,21v-2h8v-2h-8v-2h-2v6h2zM7,9v2H3v2h4v2h2V9H7zM21,13v-2H11v2h10zM15,9h2V7h4V5h-4V3h-2v6z"
 private const val ICON_LOOP =
     "M7,7h10v3l4,-4,-4,-4v3H5v6h2V7zM17,17H7v-3l-4,4,4,4v-3h12v-6h-2v4z"
 
 // the band's buttons: a little under M3's 48 dp, so the band stays one slim row
 private val BAND_BUTTON = 44.dp
+// the band holds − ♩ = N + and the options button from this width (a tablet, a phone in landscape)
+private val BAND_WITH_TEMPO_BUTTONS = 440.dp
 
 // the cursor: a light band over the notes being played and a dot on each notehead
 private val CURSOR_BAND = Color(0x3300A0FF)
@@ -60,24 +65,32 @@ private val CURSOR_HEAD = Color(0x8800A0FF)
 /**
  * The playback band, in the bottom bar above the page dots: ⏮ (back to the start of the loop or
  * of the piece), ▶ / ⏸, the loop (on / off, the whole piece unless A or B is set), the A and B
- * markers (a tap sets one where the music is, a second tap clears it) and the tempo, which opens
- * the playback options. It shows with the bars (centre tap); the music goes on when they hide.
+ * markers (a tap sets one where the music is, a second tap clears it), the tempo with its − / +
+ * (repeating while held), and the playback options. On a narrow screen − / + leave room, and a
+ * tap on the tempo opens the options. It shows with the bars (centre tap); the music goes on when
+ * they hide.
  */
 @Composable
 fun PlaybackBand(
     state: PlayState,
     loop: Loop,
     bpm: Int,
+    minBpm: Int,
+    maxBpm: Int,
     onPlayPause: () -> Unit,
     onRestart: () -> Unit,
     onLoop: () -> Unit,
     onA: () -> Unit,
     onB: () -> Unit,
+    onTempo: (Int) -> Unit,
     onOptions: () -> Unit,
     modifier: Modifier = Modifier,
-) {
+) = BoxWithConstraints(modifier.fillMaxWidth()) {
+    val wide = maxWidth >= BAND_WITH_TEMPO_BUTTONS
+    // the held button reads the tempo it changes, not the one it saw when the press began
+    val current by rememberUpdatedState(bpm)
     Row(
-        modifier = modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.Center,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -110,8 +123,19 @@ fun PlaybackBand(
             onClick = onB,
         ) { Text("B", style = MaterialTheme.typography.labelLarge) }
         Spacer(Modifier.width(8.dp))
-        TextButton(onClick = onOptions) {
+        if (wide) {
+            RepeatButton("−", stringResource(R.string.tempo_slower), enabled = bpm > minBpm, size = BAND_BUTTON) {
+                onTempo((current - 1).coerceAtLeast(minBpm))
+            }
             Text(stringResource(R.string.tempo_value, bpm), style = MaterialTheme.typography.labelLarge)
+            RepeatButton("+", stringResource(R.string.tempo_faster), enabled = bpm < maxBpm, size = BAND_BUTTON) {
+                onTempo((current + 1).coerceAtMost(maxBpm))
+            }
+            BandButton(stringResource(R.string.menu_playback), active = false, onClick = onOptions) { ToolIcon(ICON_OPTIONS) }
+        } else {
+            TextButton(onClick = onOptions) {
+                Text(stringResource(R.string.tempo_value, bpm), style = MaterialTheme.typography.labelLarge)
+            }
         }
     }
 }

@@ -36,6 +36,7 @@ import androidx.compose.ui.res.stringResource
 import com.musigatto.fosscore.library.ImportResult
 import com.musigatto.fosscore.library.LibraryRepository
 import com.musigatto.fosscore.library.Sheet
+import com.musigatto.fosscore.score.ScorePrecompute
 import com.musigatto.fosscore.score.SheetFormat
 import com.musigatto.fosscore.ui.library.LibraryMenuDrawer
 import com.musigatto.fosscore.ui.library.LibraryScreen
@@ -48,6 +49,12 @@ import java.io.File
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    // the scores are laid out ahead only while the user leaves the tablet alone
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        ScorePrecompute.touched()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()

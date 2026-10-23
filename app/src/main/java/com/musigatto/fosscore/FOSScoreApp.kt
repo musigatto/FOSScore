@@ -4,6 +4,7 @@ import android.app.Application
 import com.musigatto.fosscore.library.LibraryRepository
 import com.musigatto.fosscore.library.StampRepository
 import com.musigatto.fosscore.library.StrokeRepository
+import com.musigatto.fosscore.score.ScorePrecompute
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -16,4 +17,10 @@ class FOSScoreApp : Application() {
 
     // cleanup work that must outlive the UI (e.g. MuPdfDoc.close())
     val applicationScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override fun onCreate() {
+        super.onCreate()
+        // MusicXML scores laid out and drawn ahead, whenever the user leaves the tablet alone
+        ScorePrecompute.start(this, applicationScope, repository.sheets())
+    }
 }

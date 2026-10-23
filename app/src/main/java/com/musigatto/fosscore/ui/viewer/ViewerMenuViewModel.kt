@@ -86,6 +86,10 @@ interface ScoreLayoutStore {
     fun save(layout: ScoreLayout)
 }
 
+/** The layout saved for [score] (the viewer's score uri), or the default one. */
+fun savedScoreLayout(context: Context, score: String): ScoreLayout =
+    SettingsLayoutStore(context.applicationContext, score).load()
+
 private class SettingsLayoutStore(private val context: Context, private val score: String) : ScoreLayoutStore {
     override fun load() = ScoreLayout(
         musicSize = Settings.musicSize(context, score),

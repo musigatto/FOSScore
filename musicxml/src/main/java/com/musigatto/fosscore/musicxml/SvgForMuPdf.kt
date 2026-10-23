@@ -1,6 +1,7 @@
 package com.musigatto.fosscore.musicxml
 
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Adapts Verovio's SVG to MuPDF's SVG reader, which ignores CSS, needs explicit sizes and has
@@ -53,9 +54,12 @@ internal object SvgForMuPdf {
         return out.append(svg, from, svg.length).toString()
     }
 
+    // the opening tag of each element name, compiled once: a page can hide hundreds of notes
+    private val OPENS = ConcurrentHashMap<String, Regex>()
+
     // where the element opened just before [start] closes, counting the same tags nested in it
     private fun endOf(svg: String, tag: String, start: Int): Int {
-        val open = Regex("<$tag\\b[^>]*>")
+        val open = OPENS.getOrPut(tag) { Regex("<$tag\\b[^>]*>") }
         val close = "</$tag>"
         var depth = 1
         var at = start

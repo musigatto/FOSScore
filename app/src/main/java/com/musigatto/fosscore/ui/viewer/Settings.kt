@@ -32,6 +32,7 @@ object Settings {
     private const val KEY_INVERT = "invert"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_LAST_PAGE = "last_page_"
+    private const val KEY_OPENED_AT = "opened_at_"
     private const val KEY_STAMP_PX = "stamp_px"
     private const val KEY_MUSIC_SIZE = "music_size_"
     private const val KEY_TRANSPOSE = "transpose_"
@@ -66,6 +67,13 @@ object Settings {
 
     fun setKeepScreenOn(context: Context, value: Boolean) {
         context.prefs().edit { putBoolean(KEY_KEEP_SCREEN_ON, value) }
+    }
+
+    /** When the score at [uri] was opened last (ms since 1970), 0 if never. */
+    fun openedAt(context: Context, uri: String): Long = context.prefs().getLong(KEY_OPENED_AT + uri, 0L)
+
+    fun setOpenedAt(context: Context, uri: String, at: Long) {
+        context.prefs().edit { putLong(KEY_OPENED_AT + uri, at) }
     }
 
     fun lastPage(context: Context, uri: String): Int =

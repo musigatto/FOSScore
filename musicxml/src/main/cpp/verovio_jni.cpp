@@ -71,7 +71,8 @@ JNIEXPORT jbyteArray JNICALL FN(nativeRenderMidi)(JNIEnv *env, jclass, jlong h)
 
 JNIEXPORT jbyteArray JNICALL FN(nativeRenderTimemap)(JNIEnv *env, jclass, jlong h)
 {
-    return bytes(env, tk(h)->RenderToTimemap());
+    // with where the measures start: a new tempo takes over on a barline
+    return bytes(env, tk(h)->RenderToTimemap(R"({"includeMeasures": true})"));
 }
 
 JNIEXPORT jbyteArray JNICALL FN(nativeGetMei)(JNIEnv *env, jclass, jlong h) { return bytes(env, tk(h)->GetMEI("")); }

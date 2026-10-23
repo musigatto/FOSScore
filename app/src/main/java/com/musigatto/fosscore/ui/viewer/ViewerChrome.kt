@@ -64,6 +64,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.musigatto.fosscore.R
 import kotlin.math.roundToInt
@@ -405,14 +406,14 @@ internal fun stepped(value: Int, step: Int, direction: Int): Int =
 
 /** A button that acts on press, then again and again while held. */
 @Composable
-internal fun RepeatButton(text: String, label: String, enabled: Boolean, onStep: () -> Unit) {
+internal fun RepeatButton(text: String, label: String, enabled: Boolean, size: Dp = 48.dp, onStep: () -> Unit) {
     val step by rememberUpdatedState(onStep)
     val scope = rememberCoroutineScope()
     val color = if (enabled) MaterialTheme.colorScheme.primary
     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     Box(
         modifier = Modifier
-            .size(48.dp)
+            .size(size)
             .semantics {
                 contentDescription = label
                 role = Role.Button

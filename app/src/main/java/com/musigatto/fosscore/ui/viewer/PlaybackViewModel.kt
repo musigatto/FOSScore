@@ -12,6 +12,7 @@ import com.musigatto.fosscore.musicxml.Part
 import com.musigatto.fosscore.musicxml.Playback
 import com.musigatto.fosscore.musicxml.SoundSpec
 import com.musigatto.fosscore.score.MusicXmlPages
+import com.musigatto.fosscore.score.ScorePrecompute
 import java.io.File
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
@@ -38,7 +39,19 @@ const val MAX_TEMPO_FACTOR = 4.0f
 const val DEFAULT_BPM = 120.0
 
 // a held − / + of the tempo repeats; the music takes the new tempo once the taps settle
-private const val SETTLE_MS = 300L
+private const val SETTLE_MS = 200L
+
+// playback of a newly laid out score is made ready once its first pages are drawn
+private const val WARM_DELAY_MS = 1000L
+
+// a new tempo or new parts heard take over on a barline at least this far ahead, started this
+// much early (a MIDI player takes a moment to sound), the old player being watched at this pace
+// and then fading out in a few steps
+private const val SWITCH_LEAD_MS = 150L
+private const val START_LATENCY_MS = 40L
+private const val SWITCH_POLL_MS = 5L
+private const val FADE_MS = 40L
+private const val FADE_STEPS = 4
 
 enum class PlayState { STOPPED, PREPARING, PLAYING, PAUSED }
 
@@ -137,6 +150,7 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
     private var starting: Job? = null
     private var settling: Job? = null
     private var following: Job? = null
+    private var warming: Job? = null
     private var position = 0.0
     // where ▶ starts next, when it is not "the page on screen": after ⏮, or a stop in a loop
     private var resumeAt: Double? = null
@@ -153,6 +167,13 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
             stop()
             lastPlayback = null
             resumeAt = null
+            warming?.cancel()
+            warming = pages?.let {
+                viewModelScope.launch {
+                    delay(WARM_DELAY_MS)
+                    it.preparePlayback()
+                }
+            }
         }
         this.pages = pages
         shownParts = shown
@@ -241,7 +262,15 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
         _state.value = PlayState.STOPPED
     }
 
-    override fun onCleared() = stop()
+    init {
+        // working ahead could be heard as hiccups in the music
+        viewModelScope.launch { _state.collect { ScorePrecompute.playing = it == PlayState.PLAYING } }
+    }
+
+    override fun onCleared() {
+        stop()
+        ScorePrecompute.playing = false
+    }
 
     private fun pause() {
         player?.pause()
@@ -319,40 +348,62 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
         }
     }
 
-    // A new tempo or new parts heard need a new MIDI. Once the taps settle, it is prepared while
-    // the music goes on, then the new player takes over at the same place: no gap in the music.
-    // Stopped, the next ▶ simply uses the new sound.
+    // A new tempo or new parts heard need a new MIDI, rewritten in milliseconds. Once the taps
+    // settle, a new player is prepared while the music goes on, then takes over at the next
+    // barline (the next notes when no barline is left), as a musician would: nothing is played
+    // twice and nothing is cut in the middle of a bar. Stopped or paused, the new player simply
+    // waits where the old one was.
     private fun soundChanged() {
         settling?.cancel()
         if (player == null) return
         settling = viewModelScope.launch {
             delay(SETTLE_MS)
             val pages = pages ?: return@launch
+            var next: MediaPlayer? = null
             try {
                 val pb = pages.playback(sound())
-                val next = preparePlayer(pb)
+                val ready = preparePlayer(pb).also { next = it }
                 val old = player
                 val oldPb = playback
-                if (!isActive || old == null || oldPb == null) {
-                    next.release()
-                    return@launch
+                if (old == null || oldPb == null) return@launch
+                var at = oldPb.quartersAt(old.currentPosition.toLong())
+                if (old.isPlaying) {
+                    // the next barline far enough ahead to seek and start in time
+                    val ahead = oldPb.quartersAt(old.currentPosition.toLong() + SWITCH_LEAD_MS)
+                    at = oldPb.bars.firstOrNull { it >= ahead }
+                        ?: oldPb.onsets.getOrNull(oldPb.onsetIndexAt(ahead) + 1)?.quarters
+                        ?: ahead
+                    ready.seekTo(pb.msExact(at).toInt())
+                    val due = oldPb.msExact(at) - START_LATENCY_MS
+                    while (old.isPlaying && old.currentPosition < due) delay(SWITCH_POLL_MS)
                 }
-                val at = oldPb.quartersAt(old.currentPosition.toLong())
-                next.seekTo(pb.msExact(at).toInt())
-                val playing = old.isPlaying
-                if (playing) next.start()
+                if (old.isPlaying) {
+                    ready.start()
+                    // the old player fades out in a few steps: cut at once, a held note clicks
+                    for (step in FADE_STEPS - 1 downTo 0) {
+                        val v = step.toFloat() / FADE_STEPS
+                        old.setVolume(v, v)
+                        delay(FADE_MS / FADE_STEPS)
+                    }
+                } else {
+                    at = oldPb.quartersAt(old.currentPosition.toLong())
+                    ready.seekTo(pb.msExact(at).toInt())
+                }
                 old.release()
-                player = next
+                next = null
+                player = ready
                 playback = pb
                 lastPlayback = pb
                 position = at
-                if (playing) follow()
+                if (ready.isPlaying) follow()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 // the old player goes on: better the old tempo than silence
                 Log.e(LOG_TAG, "new sound could not be prepared: ${e::class.simpleName}: ${e.message}", e)
             } finally {
+                // cut short (stopped, or another change): the player made for nothing goes
+                next?.release()
                 if (settling === coroutineContext[Job]) settling = null
             }
         }

@@ -115,6 +115,8 @@ import com.musigatto.fosscore.musicxml.LayoutSpec
 import com.musigatto.fosscore.musicxml.PageGeometry
 import com.musigatto.fosscore.pdf.MuPdfDoc
 import com.musigatto.fosscore.score.MusicXmlPages
+import com.musigatto.fosscore.score.MusicXmlScreen
+import com.musigatto.fosscore.score.ScorePrecompute
 import com.musigatto.fosscore.score.PageSource
 import com.musigatto.fosscore.score.SheetFormat
 import kotlinx.coroutines.CancellationException
@@ -153,6 +155,8 @@ private val SELECTOR_ROOM = 68.dp
 // lose their 10 dp of air on top
 private val PLAYBACK_BAND_ROOM = 44.dp
 private val SELECTOR_AIR = 10.dp
+// how long the sizes of a MusicXML page must stay still before it is laid out
+private const val LAYOUT_SETTLE_MS = 120L
 // The top-left corner where the ☰ button sits when the bars are shown, as wide as the button with
 // its margin: a tap there opens the menu even with the bars hidden. Far from the left third's edge,
 // so page turns keep their zone.
@@ -675,6 +679,7 @@ fun PdfViewerScreen(
             if (pageCount > 0) currentPage = currentPage.coerceIn(0, pageCount - 1)
             if (doc is MusicXmlPages) menu.onScoreRead(doc.parts)
             pageSource = doc
+            ScorePrecompute.opened(context, pdfUri.toString())
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {
@@ -704,21 +709,24 @@ fun PdfViewerScreen(
     LaunchedEffect(pageSource, viewport, twoUpSlots, scoreLayout, parts, barsX, chromeTop, chromeBottom) {
         val pages = pageSource as? MusicXmlPages ?: return@LaunchedEffect
         if (viewport == IntSize.Zero) return@LaunchedEffect
+        // the system bars settle over the first frames, restarting this effect each time: a
+        // layout for sizes about to change took seconds on a slow tablet, and could not be cut
+        // short, so the right one waited behind it
+        delay(LAYOUT_SETTLE_MS)
         val usableW = (viewport.width - 2 * barsX).coerceAtLeast(1)
-        val spec = LayoutSpec(
-            width = if (twoUpSlots) usableW / 2 else usableW,
-            height = viewport.height,
-            // the music size follows the whole screen, so two-up does not shrink the notes
-            scale = (LayoutSpec.defaultScale(viewport.width, viewport.height, densityDpi) * scoreLayout.musicSize / 100)
-                .coerceIn(LayoutSpec.MIN_SCALE, LayoutSpec.MAX_SCALE),
+        val screen = MusicXmlScreen(
+            viewportWidth = viewport.width,
+            viewportHeight = viewport.height,
+            pageWidth = if (twoUpSlots) usableW / 2 else usableW,
+            baseScale = LayoutSpec.defaultScale(viewport.width, viewport.height, densityDpi),
             // a very short window keeps at least half its height for the music
             marginTop = chromeTop.coerceAtMost(viewport.height / 4),
             marginBottom = chromeBottom.coerceAtMost(viewport.height / 4),
-            semitones = scoreLayout.semitones,
-            parts = scoreLayout.layoutParts(parts),
-            lyrics = scoreLayout.lyrics,
-            hiddenLyrics = scoreLayout.keepHiddenLyrics,
+            twoUp = twoUpSlots,
         )
+        val spec = screen.spec(scoreLayout, parts)
+        // the other scores get laid out and drawn ahead for this screen too
+        withContext(Dispatchers.IO) { MusicXmlPages.rememberScreen(context, screen) }
         val before = pageCount
         try {
             val changed = rendererLock.withLock {
@@ -2079,11 +2087,14 @@ fun PdfViewerScreen(
                             state = playState,
                             loop = loop,
                             bpm = bpmOf(tempoFactor, writtenBpm),
+                            minBpm = bpmOf(MIN_TEMPO_FACTOR, writtenBpm),
+                            maxBpm = bpmOf(MAX_TEMPO_FACTOR, writtenBpm),
                             onPlayPause = { playbackVm.playPause(notesOnScreen()) },
                             onRestart = playbackVm::restart,
                             onLoop = playbackVm::toggleLoop,
                             onA = playbackVm::tapA,
                             onB = playbackVm::tapB,
+                            onTempo = { playbackVm.setTempo(factorOf(it, writtenBpm)) },
                             onOptions = { menu.show(ViewerSurface.PLAYBACK) },
                         )
                         if (playbackFailed) {

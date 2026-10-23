@@ -77,10 +77,56 @@ class PlaybackAndOptionsTest {
         assertFalse(o.getBoolean("adjustPageHeight"))
     }
 
+    // a header and three tracks: the tempo (500000 µs per quarter), then a note on each staff,
+    // the second one in running status
+    private fun midi(): ByteArray {
+        fun track(vararg events: Int) = byteArrayOf(0x4D, 0x54, 0x72, 0x6B, 0, 0, 0, events.size.toByte()) +
+            ByteArray(events.size) { events[it].toByte() }
+        val header = byteArrayOf(0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 1, 0, 3, 0x01, 0xE0.toByte())
+        return header +
+            track(0, 0xFF, 0x51, 3, 0x07, 0xA1, 0x20, 0, 0xFF, 0x2F, 0) +
+            track(0, 0x90, 60, 100, 0x81, 0x70, 62, 90, 0, 0xFF, 0x2F, 0) +
+            track(0, 0x91, 48, 80, 0, 0xFF, 0x2F, 0)
+    }
+
     @Test
-    fun tempoFactorIsKeptInARange() {
-        assertEquals(4.0, VerovioOptions.tempo(10.0).getDouble("midiTempoAdjustment"), 0.0)
-        assertEquals(0.75, VerovioOptions.tempo(0.75).getDouble("midiTempoAdjustment"), 0.0)
+    fun theTempoAndThePartsHeardAreRewrittenInTheMidi() {
+        val original = midi()
+        val out = MidiEdit.edit(original, 2.0, setOf(1))
+        assertEquals(original.size, out.size)
+        // 500000 / 2 = 250000 = 0x03D090
+        assertEquals(listOf(0x03, 0xD0, 0x90), (26..28).map { out[it].toInt() and 0xFF })
+        // track 1 muted, in running status too: velocity 0 is a note off
+        assertEquals(0, out[44].toInt())
+        assertEquals(0, out[48].toInt())
+        // track 2 untouched
+        assertEquals(80, out[out.size - 5].toInt())
+    }
+
+    @Test
+    fun theTimingComesFromTheMidiAndFollowsItsTempo() {
+        // 240 ticks at 480 per quarter, ♩ = 120: half a quarter, 250 ms; twice as fast, 125 ms
+        val (ms, quarters) = MidiEdit.timing(midi())
+        assertEquals(listOf(0L, 250L), ms.toList())
+        assertEquals(listOf(0.0, 0.5), quarters.toList())
+        val faster = Playback.of(MidiEdit.edit(midi(), 2.0), emptyList())
+        assertEquals(0.5, faster.quartersAt(125), 1e-9)
+    }
+
+    @Test
+    fun theMeasuresStartWhereTheTimemapSays() {
+        val timemap = """[{"qstamp":0,"tstamp":0,"measureOn":"m1","on":["n1"]},{"qstamp":1,"tstamp":500,"on":["n2"]},""" +
+            """{"qstamp":4,"tstamp":2000,"measureOn":"m2"}]"""
+        assertEquals(listOf(0.0, 4.0), Playback.barsOf(timemap))
+        assertEquals(2, Playback.onsetsOf(timemap).size)
+    }
+
+    @Test
+    fun aTranspositionMovesTheNotes() {
+        val out = MidiEdit.edit(midi(), 1.0, semitones = 2)
+        assertEquals(62, out[43].toInt())
+        assertEquals(64, out[47].toInt())
+        assertEquals(50, out[out.size - 6].toInt())
     }
 
     @Test

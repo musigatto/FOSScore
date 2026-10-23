@@ -5,6 +5,7 @@ import android.net.Uri
 import android.util.Log
 import com.musigatto.fosscore.R
 import com.musigatto.fosscore.musicxml.MusicXmlScore
+import com.musigatto.fosscore.score.ScorePrecompute
 import com.musigatto.fosscore.score.SheetFormat
 import java.io.File
 import java.io.IOException
@@ -84,7 +85,10 @@ class LibraryRepository(context: Context) {
                 musicalKey = "",
                 tags = ""
             )
-            ImportResult.Ok(sheet.copy(id = dao.insert(sheet)))
+            val saved = sheet.copy(id = dao.insert(sheet))
+            // a MusicXML score is laid out and drawn ahead while the user looks at its details
+            if (format.isMusicXml) ScorePrecompute.changed()
+            ImportResult.Ok(saved)
         } catch (e: Exception) {
             Log.e("FOSScore-Library", "importar ${uri.lastPathSegment}: ${e.message}", e)
             ImportResult.Error(R.string.err_import_failed)
