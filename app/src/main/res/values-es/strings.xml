@@ -144,6 +144,12 @@
     <string name="menu_open">Abrir el menú</string>
     <string name="backup_export">Exportar la biblioteca</string>
     <string name="backup_import">Importar una exportación de la biblioteca</string>
+    <string name="library_menu_setlists">Setlists</string>
+    <string name="library_menu_tags">Etiquetas</string>
+    <string name="library_menu_practice">Práctica</string>
+    <string name="library_menu_settings">Ajustes</string>
+    <string name="library_menu_about">Acerca de</string>
+    <string name="library_menu_soon">Próximamente</string>
     <plurals name="backup_exported">
         <item quantity="one">Biblioteca exportada: %1$d partitura</item>
         <item quantity="many">Biblioteca exportada: %1$d partituras</item>

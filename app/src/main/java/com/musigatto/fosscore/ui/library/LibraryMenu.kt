@@ -14,6 +14,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DrawerState
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
@@ -48,8 +49,9 @@ import kotlinx.coroutines.withContext
 
 /**
  * The library's side menu, opened by the ☰ button of the library header or by swiping from the
- * left edge. It holds what concerns the whole app: today the export and import of the library,
- * later the settings and "About". [onMessage] shows a short result to the user.
+ * left edge. It holds what concerns the whole app: the export and import of the library, then,
+ * greyed out until they are built, setlists, tags, practice, the settings and "About" (roadmap
+ * 3.6). [onMessage] shows a short result to the user.
  */
 @Composable
 fun LibraryMenuDrawer(drawerState: DrawerState, onMessage: (String) -> Unit, content: @Composable () -> Unit) {
@@ -127,6 +129,13 @@ fun LibraryMenuDrawer(drawerState: DrawerState, onMessage: (String) -> Unit, con
                     },
                     modifier = Modifier.padding(horizontal = 12.dp)
                 )
+                HorizontalDivider(Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+                SoonItem(R.string.library_menu_setlists)
+                SoonItem(R.string.library_menu_tags)
+                SoonItem(R.string.library_menu_practice)
+                HorizontalDivider(Modifier.padding(horizontal = 28.dp, vertical = 8.dp))
+                SoonItem(R.string.library_menu_settings)
+                SoonItem(R.string.library_menu_about)
             }
         },
         content = content
@@ -148,6 +157,23 @@ fun LibraryMenuDrawer(drawerState: DrawerState, onMessage: (String) -> Unit, con
             }
         )
     }
+}
+
+// an entry that is not built yet: greyed out, "Coming soon" under it, and a tap does nothing
+@Composable
+private fun SoonItem(label: Int) {
+    val grey = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    NavigationDrawerItem(
+        label = {
+            Column {
+                Text(stringResource(label), color = grey)
+                Text(stringResource(R.string.library_menu_soon), color = grey, style = MaterialTheme.typography.labelSmall)
+            }
+        },
+        selected = false,
+        onClick = {},
+        modifier = Modifier.padding(horizontal = 12.dp)
+    )
 }
 
 @Composable
