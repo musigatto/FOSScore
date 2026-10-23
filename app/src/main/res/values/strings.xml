@@ -43,6 +43,12 @@
     <string name="theme_dark">Dark</string>
     <string name="delete_sheet_title">Delete this sheet?</string>
     <string name="delete_sheet_text">It will be removed from the library and the device.</string>
+    <plurals name="library_selected">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="delete_sheets_title">Delete these %1$d sheets?</string>
+    <string name="delete_sheets_text">They will be removed from the library and the device.</string>
     <string name="sheet_already_in_library">That sheet is already in the library</string>
     <string name="desc_page">Page %1$d of %2$d</string>
     <string name="desc_page_range">Pages %1$d-%2$d of %3$d</string>

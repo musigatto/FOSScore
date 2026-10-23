@@ -43,6 +43,13 @@
     <string name="theme_dark">Oscuro</string>
     <string name="delete_sheet_title">¿Eliminar esta partitura?</string>
     <string name="delete_sheet_text">Se borrará de la biblioteca y del dispositivo.</string>
+    <plurals name="library_selected">
+        <item quantity="one">%1$d seleccionada</item>
+        <item quantity="many">%1$d seleccionadas</item>
+        <item quantity="other">%1$d seleccionadas</item>
+    </plurals>
+    <string name="delete_sheets_title">¿Borrar estas %1$d partituras?</string>
+    <string name="delete_sheets_text">Se quitarán de la biblioteca y del dispositivo.</string>
     <string name="sheet_already_in_library">Esa partitura ya está en la biblioteca</string>
     <string name="desc_page">Página %1$d de %2$d</string>
     <string name="desc_page_range">Páginas %1$d-%2$d de %3$d</string>

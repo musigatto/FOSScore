@@ -26,6 +26,13 @@
     <string name="theme_dark">Sombre</string>
     <string name="delete_sheet_title">Supprimer cette partition ?</string>
     <string name="delete_sheet_text">Elle sera supprimée de la bibliothèque et de l’appareil.</string>
+    <plurals name="library_selected">
+        <item quantity="one">%1$d sélectionnée</item>
+        <item quantity="many">%1$d sélectionnées</item>
+        <item quantity="other">%1$d sélectionnées</item>
+    </plurals>
+    <string name="delete_sheets_title">Supprimer ces %1$d partitions ?</string>
+    <string name="delete_sheets_text">Elles seront supprimées de la bibliothèque et de l’appareil.</string>
     <string name="sheet_already_in_library">Cette partition est déjà dans la bibliothèque</string>
     <string name="desc_page">Page %1$d sur %2$d</string>
     <string name="err_open_file">Le fichier n’a pas pu être ouvert</string>
