@@ -30,6 +30,8 @@ object Settings {
     private const val KEY_THEME = "theme"
     private const val KEY_DIM = "dim"
     private const val KEY_INVERT = "invert"
+    private const val KEY_HALF_PAGE = "half_page_"
+    private const val KEY_TWO_UP = "two_up"
     private const val KEY_KEEP_SCREEN_ON = "keep_screen_on"
     private const val KEY_LAST_PAGE = "last_page_"
     private const val KEY_STAMP_PX = "stamp_px"
@@ -58,6 +60,21 @@ object Settings {
 
     fun setInvert(context: Context, value: Boolean) {
         context.prefs().edit { putBoolean(KEY_INVERT, value) }
+    }
+
+    // how the pages show, the same for every score: half page for each orientation (the stand is
+    // not held the same way), two pages side by side in landscape
+    fun halfPage(context: Context, landscape: Boolean): Boolean =
+        context.prefs().getBoolean(KEY_HALF_PAGE + if (landscape) "landscape" else "portrait", false)
+
+    fun setHalfPage(context: Context, landscape: Boolean, value: Boolean) {
+        context.prefs().edit { putBoolean(KEY_HALF_PAGE + if (landscape) "landscape" else "portrait", value) }
+    }
+
+    fun twoUp(context: Context): Boolean = context.prefs().getBoolean(KEY_TWO_UP, true)
+
+    fun setTwoUp(context: Context, value: Boolean) {
+        context.prefs().edit { putBoolean(KEY_TWO_UP, value) }
     }
 
     // the screen stays awake while a score is on screen, so it does not sleep mid-performance

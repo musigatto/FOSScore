@@ -282,8 +282,9 @@ fun PdfViewerScreen(
     var currentPage by rememberSaveable(pdfUri) {
         mutableIntStateOf(Settings.lastPage(context, pdfUri.toString()))
     }
-    var twoUp by rememberSaveable { mutableStateOf(isLandscape) }
-    var halfEnabled by rememberSaveable { mutableStateOf(false) }
+    // the same for every score, half page for each orientation (Settings)
+    var twoUp by remember { mutableStateOf(Settings.twoUp(context)) }
+    var halfEnabled by remember(isLandscape) { mutableStateOf(Settings.halfPage(context, isLandscape)) }
     var halfTurned by rememberSaveable { mutableStateOf(false) }
     // the chrome starts hidden: the app is the page (spec §0)
     var navVisible by rememberSaveable { mutableStateOf(false) }
@@ -510,6 +511,9 @@ fun PdfViewerScreen(
             halfEnabled = false
             halfTurned = false
         } else {
+            // back to the pages as the user set them
+            twoUp = Settings.twoUp(context)
+            halfEnabled = Settings.halfPage(context, isLandscape)
             undoStack = emptyList()
             redoStack = emptyList()
             selectedId = null
@@ -2139,9 +2143,13 @@ fun PdfViewerScreen(
                 onSetHalf = {
                     halfEnabled = it
                     halfTurned = false
+                    Settings.setHalfPage(context, isLandscape, it)
                 },
                 twoUp = twoUp,
-                onSetTwoUp = { twoUp = it },
+                onSetTwoUp = {
+                    twoUp = it
+                    Settings.setTwoUp(context, it)
+                },
                 twoUpVisible = isLandscape,
                 themeLabel = themeMode.label(),
                 onToggleTheme = onToggleTheme,
