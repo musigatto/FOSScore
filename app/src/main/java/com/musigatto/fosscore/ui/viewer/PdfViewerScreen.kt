@@ -117,6 +117,7 @@ import com.musigatto.fosscore.pdf.MuPdfDoc
 import com.musigatto.fosscore.score.MusicXmlPages
 import com.musigatto.fosscore.score.PageSource
 import com.musigatto.fosscore.score.SheetFormat
+import java.util.WeakHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -754,21 +755,36 @@ fun PdfViewerScreen(
         )
     }
 
+    // a page's height in its SVG units, from the page box (null before the first page is read)
+    val pageHeight = pageBox?.let { b -> { geo: PageGeometry -> geo.width * b.height / b.width } }
+
+    // Where a turned half page cuts: between two systems, in the blank bands of the pages drawn
+    // (HalfSplit), read once per picture
+    val blankBands = remember { WeakHashMap<Bitmap, List<Band>>() }
+    fun halfSplit(): HalfSplit {
+        fun bands(index: Int) = bitmaps[index]?.let { bmp -> blankBands.getOrPut(bmp) { bmp.blankBands() } }.orEmpty()
+        return HalfSplit.of(bands(currentPage), bands(currentPage + 1))
+    }
+
+    // Whether the notehead [id] is above [fraction] of its page's height (a hidden note counts as at the top).
+    fun above(geo: PageGeometry, id: String, fraction: Float) =
+        pageHeight == null || (geo.head(id)?.y ?: 0f) < pageHeight(geo) * fraction
+
     // The notes on screen, for ▶ (it starts where the eyes are) and for the follow below. A turned
-    // half page shows the top half of the next page over the bottom half of this one.
+    // half page shows the top of the next page over the bottom of this one.
     fun notesOnScreen(notes: Collection<String>? = null): Set<String> {
         val pages = pageSource as? MusicXmlPages ?: return emptySet()
         fun onPage(index: Int, keep: (PageGeometry, String) -> Boolean = { _, _ -> true }): List<String> {
             val geo = pages.geometry(index) ?: return emptyList()
             return (notes ?: geo.noteIds).filter { it in geo.noteIds && keep(geo, it) }
         }
-        val pageHeight = pageBox?.let { b -> { geo: PageGeometry -> geo.width * b.height / b.width } }
-        fun upper(geo: PageGeometry, id: String) =
-            pageHeight == null || (geo.head(id)?.y ?: 0f) < pageHeight(geo) / 2
         return when {
             branch.showTwoUp -> onPage(currentPage) + onPage(currentPage + 1)
-            branch.showHalf && halfTurned ->
-                onPage(currentPage + 1) { g, id -> upper(g, id) } + onPage(currentPage) { g, id -> !upper(g, id) }
+            branch.showHalf && halfTurned -> {
+                val split = halfSplit()
+                onPage(currentPage + 1) { g, id -> above(g, id, split.upper) } +
+                    onPage(currentPage) { g, id -> !above(g, id, split.lower) }
+            }
             else -> onPage(currentPage)
         }.toSet()
     }
@@ -780,28 +796,27 @@ fun PdfViewerScreen(
         halfTurned = false
     }
 
-    // Follow the music: when the notes being played leave the screen, turn to their page. A page
-    // turned by hand during playback lets the reader look ahead: the follow waits until the music
-    // is on screen again (as in the MusicXML prototype).
+    // Follow the music: the pages turn as PageFlow.follow says (in half page, the top of the next
+    // page when the music gets to it, the whole page when the music gets to its lower part). A
+    // page turned by hand during playback lets the reader look ahead: the follow waits until the
+    // music is on screen again (as in the MusicXML prototype).
     LaunchedEffect(cursorNotes) {
         val pages = pageSource as? MusicXmlPages ?: return@LaunchedEffect
         if (cursorNotes.isEmpty()) return@LaunchedEffect
-        if (notesOnScreen(cursorNotes).isNotEmpty()) {
-            playbackVm.musicOnScreen()
-            return@LaunchedEffect
-        }
+        val onScreen = notesOnScreen(cursorNotes).isNotEmpty()
+        if (onScreen) playbackVm.musicOnScreen()
         if (playbackVm.followPaused) return@LaunchedEffect
         val target = pages.pageOf(cursorNotes.first())
         if (target < 0) return@LaunchedEffect
-        when {
-            // half page: the top of the next page shows first, under the end of this one
-            branch.showHalf && !halfTurned && target == currentPage + 1 -> halfTurned = true
-            branch.showTwoUp && target == currentPage + 1 -> Unit
-            else -> {
-                currentPage = target
-                halfTurned = false
-            }
-        }
+        // below the top of the next page that a turned half page shows
+        val upper = halfSplit().upper
+        val inLowerPart = pages.geometry(target)?.let { geo ->
+            val heads = cursorNotes.filter { geo.head(it) != null }
+            heads.isNotEmpty() && heads.none { above(geo, it, upper) }
+        } ?: false
+        val f = branch.follow(target, inLowerPart, onScreen)
+        currentPage = f.page
+        halfTurned = f.halfTurned
     }
 
     // zoom back to zero when the page or the reading mode changes (the draw step too: otherwise
@@ -1553,27 +1568,44 @@ fun PdfViewerScreen(
                         val w = cur.width
                         val h = cur.height
                         val sepColor = MaterialTheme.colorScheme.primary.toArgb()
+                        val split = halfSplit()
                         // remember keyed on the BITMAPS (not on the map): with a SnapshotStateMap,
                         // reading the keys above already registers the dependency, so this only
                         // recomposes if they change
-                        val combined = remember(cur, next, w, h) {
+                        val combined = remember(cur, next, w, h, split) {
                             val out = createBitmap(w, h)
                             val canvas = android.graphics.Canvas(out)
                             val paint = android.graphics.Paint().apply { isFilterBitmap = true }
-                            canvas.drawBitmap(next, AndroidRect(0, 0, next.width, next.height / 2), AndroidRect(0, 0, w, h / 2), paint)
-                            canvas.drawBitmap(cur, AndroidRect(0, cur.height / 2, cur.width, cur.height), AndroidRect(0, h / 2, w, h), paint)
+                            // a MusicXML page cuts between systems: blank paper between the two parts
+                            canvas.drawColor(android.graphics.Color.WHITE)
+                            val upper = (h * split.upper).toInt()
+                            val lower = (h * split.lower).toInt()
+                            canvas.drawBitmap(next, AndroidRect(0, 0, next.width, (next.height * split.upper).toInt()), AndroidRect(0, 0, w, upper), paint)
+                            canvas.drawBitmap(cur, AndroidRect(0, (cur.height * split.lower).toInt(), cur.width, cur.height), AndroidRect(0, lower, w, h), paint)
                             paint.color = sepColor
                             paint.strokeWidth = (h / 200f).coerceAtLeast(2f)
-                            canvas.drawLine(0f, (h / 2).toFloat(), w.toFloat(), (h / 2).toFloat(), paint)
+                            canvas.drawLine(0f, lower.toFloat(), w.toFloat(), lower.toFloat(), paint)
                             out
                         }
-                        Image(
-                            bitmap = combined.asImageBitmap(),
-                            contentDescription = null,
-                            contentScale = ContentScale.Fit,
-                            colorFilter = if (invert) INVERT_FILTER else null,
-                            modifier = spreadMod.then(gestureMod)
-                        )
+                        Box(spreadMod.then(gestureMod)) {
+                            Image(
+                                bitmap = combined.asImageBitmap(),
+                                contentDescription = null,
+                                contentScale = ContentScale.Fit,
+                                colorFilter = if (invert) INVERT_FILTER else null,
+                                modifier = Modifier.fillMaxSize()
+                            )
+                            // the cursor, on whichever part the music is in
+                            val pages = pageSource as? MusicXmlPages
+                            if (pages != null && cursorNotes.isNotEmpty()) {
+                                pages.geometry(currentPage + 1)?.let { geo ->
+                                    FitPlaybackCursor(geo, cursorNotes.filter { above(geo, it, split.upper) }, w, h, Modifier.fillMaxSize())
+                                }
+                                pages.geometry(currentPage)?.let { geo ->
+                                    FitPlaybackCursor(geo, cursorNotes.filter { !above(geo, it, split.lower) }, w, h, Modifier.fillMaxSize())
+                                }
+                            }
+                        }
                     }
                     else -> {
                         (bitmaps[currentPage] ?: lastShown)?.let { bmp ->
