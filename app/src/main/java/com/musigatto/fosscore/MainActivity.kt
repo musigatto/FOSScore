@@ -124,6 +124,8 @@ private fun FOSScoreNav(
     var messageText by remember { mutableStateOf<String?>(null) }
     val snackbar = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
+    // the library's side menu, kept here for the back key below
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             scope.launch {
@@ -165,7 +167,6 @@ private fun FOSScoreNav(
         // ponytail: the library covers the whole screen. The sliding/tiled sidebar and its animation
         // are their own step — this layering is what they will need.
         if (s.libraryOpen || s.sheet == null) {
-            val drawerState = rememberDrawerState(DrawerValue.Closed)
             LibraryMenuDrawer(drawerState, onMessage = { messageText = it }) {
                 Scaffold(snackbarHost = { SnackbarHost(snackbar) }) { padding ->
                     Box(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -210,6 +211,9 @@ private fun FOSScoreNav(
         // registered after the viewer on purpose: BackHandler resolves last-registered-first, so with
         // the menu open back closes the menu instead of leaving the score
         if (s.libraryOpen && s.sheet != null) BackHandler { nav = nav.copy(libraryOpen = false) }
+
+        // then: with the library's side menu open, back closes the menu, not the library or the app
+        if (drawerState.isOpen) BackHandler { scope.launch { drawerState.close() } }
 
         // and last of all: with the metadata editor on top, back closes the editor (same as its
         // Volver), not the layer underneath it

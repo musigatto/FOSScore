@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -79,6 +80,9 @@ fun LibraryScreen(
             value = query,
             onValueChange = { query = it },
             label = { Text(stringResource(R.string.search_label)) },
+            // the keyboard waits for a tap: the field can get the focus by itself (after a pedal
+            // or a keyboard key), and the keyboard would then hide the list
+            keyboardOptions = KeyboardOptions(showKeyboardOnFocus = false),
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
