@@ -118,6 +118,27 @@ class RenderingTextTest {
         assertEquals(500f, head.top, 0.01f)
         assertEquals(1220f, head.bottom, 0.01f)
         assertEquals(180f, head.space, 0.01f)
+        // the bar goes on past the line's last notes to where its staves end
+        assertEquals(900f + 400f, head.lineEnd, 0.01f)
         assertNull(page.head("n2"))
+    }
+
+    @Test
+    fun aLineEndsWhereItsStavesEndWhenTheyCarryTheirNumber() {
+        // the staves as Verovio draws them with svgAdditionalAttribute staff@n (the annotations
+        // ask for it): the number comes before the lines, and must not be read as them. The
+        // playback bar stopped on a line's last notes when it was (2026-10-27 and 10-28)
+        val svg = """<svg viewBox="0 0 2100 2970"><svg class="definition-scale" color="black" viewBox="0 0 21000 29700">""" +
+            """<g class="page-margin" transform="translate(400, 400)"><g class="system">""" +
+            """<g id="m1" class="measure" data-n="1"><g id="s1" class="staff" data-n="1"><path d="M0 100 L500 100" stroke-width="13"/>""" +
+            """<path d="M0 280 L500 280" stroke-width="13"/></g></g>""" +
+            """<g id="m2" class="measure" data-n="2"><g id="s2" class="staff" data-n="1"><path d="M500 100 L900 100" stroke-width="13"/>""" +
+            """<path d="M500 280 L900 280" stroke-width="13"/></g>""" +
+            """<g id="n1" class="note"><g class="notehead"><use xlink:href="#E0A4" transform="translate(600, 190)"/></g></g></g>""" +
+            """</g></g></svg></svg>"""
+        val head = PageGeometry.parse(svg).head("n1")
+        assertNotNull(head)
+        assertEquals(900f + 400f, head?.lineEnd ?: 0f, 0.01f)
+        assertEquals(500f, head?.top ?: 0f, 0.01f)
     }
 }

@@ -41,6 +41,8 @@ Pending (detailed roadmap in the GitHub issues):
 - **MusicXML layout:** Verovio 6.3.0, built from its release source by the `musicxml` module (downloaded by the first build, NDK; see `musicxml/README.md`)
 - **Database:** Room (SQLite)
 - **Audio:** ExoPlayer / Media3
+- **Score playback:** our own SoundFont sampler in Kotlin (SF2 and SF3, no native code) playing the
+  MusicXML score live, with the GeneralUser GS bank in SF3 (9.2 MB in the APK)
 - **MIDI:** Android MIDI framework
 
 ## License
@@ -64,6 +66,7 @@ AGPL. In practice:
 | [Leipzig](https://github.com/rism-digital/leipzig) music font | music symbols drawn by Verovio | SIL Open Font License 1.1 | shipped with Verovio (its `fonts/` folder) |
 | [Bravura](https://github.com/steinbergmedia/bravura) music font (Daniel Spreadbury, Steinberg) | stamps in the annotator (fingering, dynamics, articulations, accidentals), and fallback for symbols missing from Leipzig | SIL Open Font License 1.1 | `app/src/main/assets/fonts/bravura.otf`; Verovio's copy ships with Verovio |
 | [Liberation](https://github.com/liberationfonts/liberation-fonts) text font | text in the layout (titles, lyrics) | SIL Open Font License 1.1 | shipped with Verovio |
+| [GeneralUser GS](https://schristiancollins.com/generaluser.php) 2.0.3 (S. Christian Collins) | the instruments of the score playback | GeneralUser GS License v2.0: free use, modification and redistribution | `app/src/main/assets/soundfont/`, its samples converted from SF2 to Ogg Vorbis (SF3, quality 0.6), its license text next to it |
 
 Verovio is built as its own shared library (`libverovio.so`), which the JNI bridge
 (`libverovio_jni.so`) loads at run time: a modified Verovio can replace it, as the LGPL requires.

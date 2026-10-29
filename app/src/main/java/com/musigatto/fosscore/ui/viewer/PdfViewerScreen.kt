@@ -40,6 +40,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -182,6 +184,16 @@ fun PdfViewerScreen(
     val heardPicked by playbackVm.heard.collectAsState()
     val playbackFailed by playbackVm.failed.collectAsState()
     val aheadNotes by playbackVm.ahead.collectAsState()
+    // another score opened, or the viewer closed: this score's music stops (its ViewModel stays
+    // in memory with the screen, and its player would go on playing)
+    DisposableEffect(playbackVm) { onDispose { playbackVm.stop() } }
+    // the music heard, read from the audio clock at every frame while it plays: the playback bar
+    // glides with it (only the bar is drawn again, nothing is composed again)
+    var playQuarters by remember { mutableStateOf<Double?>(null) }
+    LaunchedEffect(playState, cursorNotes) {
+        playQuarters = playbackVm.positionNow()
+        if (playState == PlayState.PLAYING) while (true) withFrameNanos { playQuarters = playbackVm.positionNow() }
+    }
 
     // the metronome: its band, its clicks and the page turns it drives (MetronomeViewModel)
     val metronomeVm: MetronomeViewModel = viewModel(
@@ -952,7 +964,7 @@ fun PdfViewerScreen(
                     branch = branch,
                     halfTurned = halfTurned,
                     halfSplit = { halfSplit() },
-                    above = { geo, id, fraction -> above(geo, id, fraction) },
+                    pageHeight = pageHeight,
                     pageFit = pageFit,
                     hitFit = hitFit,
                     scale = { zoom.transform.scale },
@@ -960,7 +972,8 @@ fun PdfViewerScreen(
                     offsetY = { zoom.transform.offset.y },
                     invert = invert,
                     pageSource = pageSource,
-                    cursorNotes = cursorNotes,
+                    playback = playbackVm.currentPlayback,
+                    playQuarters = { playQuarters },
                     halfCut = paper.halfCut,
                     layoutVersion = layoutVersion,
                     canEdit = canEdit,

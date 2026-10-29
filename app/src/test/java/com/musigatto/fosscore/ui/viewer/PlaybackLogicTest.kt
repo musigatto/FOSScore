@@ -73,4 +73,11 @@ class PlaybackLogicTest {
         // a part that is no longer in the file is dropped; with nothing left, every part plays
         assertEquals(setOf("P1", "P2"), heardParts(setOf("gone"), setOf("P1"), parts))
     }
+
+    @Test
+    fun everyPartCanBeMutedOnPurpose() {
+        // the bar then follows the music without sound
+        val parts = listOf(Part("P1", "Piano"))
+        assertEquals(emptySet<String>(), heardParts(emptySet(), setOf("P1"), parts))
+    }
 }

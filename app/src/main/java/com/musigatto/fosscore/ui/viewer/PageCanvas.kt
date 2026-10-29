@@ -48,6 +48,7 @@ import com.musigatto.fosscore.R
 import com.musigatto.fosscore.library.Stamp
 import com.musigatto.fosscore.library.Stroke
 import com.musigatto.fosscore.musicxml.PageGeometry
+import com.musigatto.fosscore.musicxml.Playback
 import com.musigatto.fosscore.score.MusicXmlPages
 import com.musigatto.fosscore.score.PageSource
 import kotlin.math.max
@@ -185,11 +186,13 @@ private fun PageOverlay(
 }
 
 /**
- * The page itself: paper, playback cursor, half-page cut line, ink, stamps, selection and the loupe.
+ * The page itself: paper, playback bar, half-page cut line, ink, stamps, selection and the loupe.
  * It only draws what it is given; the reading modes and the fit rect are decided by the viewer.
  *
  * [scale], [offsetX] and [offsetY] are lambdas on purpose: they change on every pinch or pan frame
  * and are read ONLY inside draw/layout lambdas, so a zoom never recomposes or re-measures this.
+ * [playQuarters], where the music is heard, is one too: it changes at every frame while the music
+ * plays, and only the playback bar is drawn again.
  */
 @Composable
 internal fun PageCanvas(
@@ -200,7 +203,7 @@ internal fun PageCanvas(
     branch: PageFlow,
     halfTurned: Boolean,
     halfSplit: () -> HalfSplit,
-    above: (PageGeometry, String, Float) -> Boolean,
+    pageHeight: ((PageGeometry) -> Float)?,
     pageFit: RectPx,
     hitFit: RectPx,
     scale: () -> Float,
@@ -208,7 +211,8 @@ internal fun PageCanvas(
     offsetY: () -> Float,
     invert: Boolean,
     pageSource: PageSource?,
-    cursorNotes: List<String>,
+    playback: Playback?,
+    playQuarters: () -> Double?,
     halfCut: HalfCut?,
     layoutVersion: Int,
     canEdit: Boolean,
@@ -246,8 +250,9 @@ internal fun PageCanvas(
                             modifier = Modifier.fillMaxSize()
                         )
                         val geo = (pageSource as? MusicXmlPages)?.geometry(index)
-                        if (geo != null && cursorNotes.isNotEmpty()) {
-                            FitPlaybackCursor(geo, cursorNotes, bmp.width, bmp.height, Modifier.fillMaxSize())
+                        if (geo != null && playback != null) {
+                            val path = remember(geo, playback) { BarPath(playback, geo) }
+                            FitPlaybackBar(path, playQuarters, bmp.width, bmp.height, Modifier.fillMaxSize())
                         }
                         // ink and stamps of each page, only on the paper it takes in its half
                         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -303,14 +308,22 @@ internal fun PageCanvas(
                     colorFilter = if (invert) INVERT_FILTER else null,
                     modifier = Modifier.fillMaxSize()
                 )
-                // the cursor, on whichever part the music is in
+                // the playback bar, on whichever part the music is in
                 val pages = pageSource as? MusicXmlPages
-                if (pages != null && cursorNotes.isNotEmpty()) {
+                if (pages != null && playback != null) {
+                    // a line of music is on the part its middle is in
+                    fun middle(s: BarSpot) = (s.top + s.bottom) / 2
                     pages.geometry(currentPage + 1)?.let { geo ->
-                        FitPlaybackCursor(geo, cursorNotes.filter { above(geo, it, split.upper) }, w, h, Modifier.fillMaxSize())
+                        val path = remember(geo, playback) { BarPath(playback, geo) }
+                        FitPlaybackBar(path, playQuarters, w, h, Modifier.fillMaxSize(), keep = { s ->
+                            pageHeight?.let { middle(s) < it(geo) * split.upper } ?: true
+                        })
                     }
                     pages.geometry(currentPage)?.let { geo ->
-                        FitPlaybackCursor(geo, cursorNotes.filter { !above(geo, it, split.lower) }, w, h, Modifier.fillMaxSize())
+                        val path = remember(geo, playback) { BarPath(playback, geo) }
+                        FitPlaybackBar(path, playQuarters, w, h, Modifier.fillMaxSize(), keep = { s ->
+                            pageHeight?.let { middle(s) >= it(geo) * split.lower } ?: true
+                        })
                     }
                 }
                 // ink and stamps, each page clipped to the band the composite shows of it: the
@@ -429,14 +442,13 @@ internal fun PageCanvas(
                                     translationY = pageFit.top + offsetY()
                                 }
                         )
-                    // the playback cursor, at the page's place and zoom
+                    // the playback bar, at the page's place and zoom
                     val cursorGeo = (pageSource as? MusicXmlPages)?.geometry(currentPage)
-                    if (cursorGeo != null && cursorNotes.isNotEmpty() && bitmaps[currentPage] != null) {
+                    if (cursorGeo != null && playback != null && bitmaps[currentPage] != null) {
+                        val path = remember(cursorGeo, playback) { BarPath(playback, cursorGeo) }
                         Canvas(modifier = Modifier.fillMaxSize()) {
-                            drawPlaybackCursor(
-                                cursorGeo, cursorNotes, pageFit.left + offsetX(), pageFit.top + offsetY(),
-                                pageFit.width * scale()
-                            )
+                            val spot = playQuarters()?.let { path.at(it) } ?: return@Canvas
+                            drawPlaybackBar(spot, path.width, pageFit.left + offsetX(), pageFit.top + offsetY(), pageFit.width * scale())
                         }
                     }
                     // in half page, a thin dotted line where the next turn cuts this page;

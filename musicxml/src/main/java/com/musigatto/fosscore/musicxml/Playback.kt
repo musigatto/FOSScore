@@ -85,7 +85,13 @@ class Playback internal constructor(
                 .filter { it.has("measureOn") }.map { it.getDouble("qstamp") }
         }
 
-        /** The onsets of a Verovio timemap: when notes start, and which. */
+        // Verovio plays a repeat by copying its notes, named after them: "abc" becomes "abc-rend2"
+        private val REPEATED = Regex("""-rend\d+$""")
+
+        /**
+         * The onsets of a Verovio timemap: when notes start, and which. A note played again by a
+         * repeat keeps the name of the note on the page, so the cursor and the pages follow it.
+         */
         fun onsetsOf(timemap: String): List<Onset> {
             val entries = JSONArray(timemap)
             val onsets = mutableListOf<Onset>()
@@ -93,7 +99,7 @@ class Playback internal constructor(
                 val entry = entries.getJSONObject(i)
                 val on = entry.optJSONArray("on") ?: continue
                 if (on.length() == 0) continue
-                onsets += Onset(entry.getDouble("qstamp"), List(on.length()) { on.getString(it) })
+                onsets += Onset(entry.getDouble("qstamp"), List(on.length()) { on.getString(it).replace(REPEATED, "") })
             }
             return onsets
         }

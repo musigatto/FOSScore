@@ -2,7 +2,6 @@ package com.musigatto.fosscore.ui.viewer
 
 import android.app.Application
 import android.content.Context
-import android.media.MediaPlayer
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -13,7 +12,9 @@ import com.musigatto.fosscore.musicxml.Playback
 import com.musigatto.fosscore.musicxml.SoundSpec
 import com.musigatto.fosscore.score.MusicXmlPages
 import com.musigatto.fosscore.score.ScorePrecompute
-import java.io.File
+import com.musigatto.fosscore.sound.LivePlayer
+import com.musigatto.fosscore.sound.MidiSong
+import com.musigatto.fosscore.sound.SoundBank
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -39,20 +40,11 @@ const val MAX_TEMPO_FACTOR = 4.0f
 // MIDI's own default, when the score writes no tempo
 const val DEFAULT_BPM = 120.0
 
-// a held − / + of the tempo repeats; the music takes the new tempo once the taps settle
+// new parts heard are taken once the taps on their boxes settle
 private const val SETTLE_MS = 200L
 
 // playback of a newly laid out score is made ready once its first pages are drawn
 private const val WARM_DELAY_MS = 1000L
-
-// a new tempo or new parts heard take over on a barline at least this far ahead, started this
-// much early (a MIDI player takes a moment to sound), the old player being watched at this pace
-// and then fading out in a few steps
-private const val SWITCH_LEAD_MS = 150L
-private const val START_LATENCY_MS = 40L
-private const val SWITCH_POLL_MS = 5L
-private const val FADE_MS = 40L
-private const val FADE_STEPS = 4
 
 enum class PlayState { STOPPED, PREPARING, PLAYING, PAUSED }
 
@@ -93,18 +85,21 @@ fun factorOf(bpm: Int, writtenBpm: Double): Float =
     (bpm / writtenBpm).toFloat().coerceIn(MIN_TEMPO_FACTOR, MAX_TEMPO_FACTOR)
 
 /**
- * The parts heard: the ones picked by the user, or the ones shown until the user picks. Never
- * empty while the score has parts, so the music never goes silent by accident.
+ * The parts heard: the ones picked by the user, or the ones shown until the user picks. Empty
+ * when the user muted them all (the bar goes on without sound); when none of the parts picked is
+ * left in the file, every part plays.
  */
 fun heardParts(picked: Set<String>?, shown: Set<String>, parts: List<Part>): Set<String> {
     val ids = parts.map { it.id }.toSet()
+    if (picked?.isEmpty() == true) return emptySet()
     return (picked?.filter { it in ids }?.toSet() ?: shown).ifEmpty { ids }
 }
 
 /**
- * MusicXML playback: the MIDI the musicxml module writes for the score, played by Android's own
- * MIDI player, and the notes being played for the viewer's cursor and page turns. Tempo and
- * parts heard are saved per score.
+ * MusicXML playback: the MIDI the musicxml module writes for the score, played live by our own
+ * SoundFont synth ([LivePlayer]), and where the music is for the viewer's playback bar and page
+ * turns. A new tempo, new parts heard or the loop apply at once. Tempo and parts heard are saved
+ * per score.
  *
  * ponytail: tempo and parts heard live in the app settings by file, like the layout
  * (ScoreLayoutStore), until the per-score configurations table exists (roadmap 3.4).
@@ -151,7 +146,7 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
     private var pages: MusicXmlPages? = null
     private var shownParts: Set<String> = emptySet()
     private var attachedFor: Any? = null
-    private var player: MediaPlayer? = null
+    private var player: LivePlayer? = null
     private var playback: Playback? = null
     // the last playback of this layout, kept after a stop: ⏮ can still show where it goes
     private var lastPlayback: Playback? = null
@@ -162,8 +157,6 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
     private var position = 0.0
     // where ▶ starts next, when it is not "the page on screen": after ⏮, or a stop in a loop
     private var resumeAt: Double? = null
-    // the MIDI files alternate: the one playing stays untouched while the next is written
-    private var midiFiles = 0
 
     /**
      * The score to play, with the [shown] parts. [loaded] stands for what the score was loaded
@@ -180,6 +173,12 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
                 viewModelScope.launch {
                     delay(WARM_DELAY_MS.milliseconds)
                     it.preparePlayback()
+                    // the sound bank and the samples of the piece too (decoded once, then kept):
+                    // ▶ then starts at once
+                    runCatching {
+                        val made = livePlayer()
+                        it.playback(liveSound())?.let { pb -> withContext(Dispatchers.Default) { made.warm(MidiSong.read(pb.midi)) } }
+                    }
                 }
             }
         }
@@ -210,39 +209,49 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
         val at = _loop.value.restartAt()
         position = at
         followPaused = false
-        val pb = player?.let { playback } ?: lastPlayback
-        player?.seekTo(pb?.msExact(at)?.toInt() ?: 0)
-        if (player == null) resumeAt = at
+        val pb = playback ?: lastPlayback
+        val p = player
+        if (playback != null && p != null) p.seek(at) else resumeAt = at
         if (pb != null) showNotesAt(pb, at) else _toFirstPage.value++
     }
 
-    fun toggleLoop() {
-        _loop.value = _loop.value.toggle()
+    fun toggleLoop() = setLoop(_loop.value.toggle())
+
+    fun tapA() = setLoop(_loop.value.tapA(position))
+
+    fun tapB() = setLoop(_loop.value.tapB(position))
+
+    /**
+     * The music heard now, in quarter notes, for the playback bar: where the player is, or where
+     * ⏮ put the music before ▶; null when nothing is to show.
+     */
+    fun positionNow(): Double? = when {
+        playback != null -> player?.position
+        _cursor.value.isNotEmpty() -> position
+        else -> null
     }
 
-    fun tapA() {
-        _loop.value = _loop.value.tapA(position)
-    }
-
-    fun tapB() {
-        _loop.value = _loop.value.tapB(position)
-    }
+    /** The playback being heard, or the last one: its notes and bars for the playback bar. */
+    val currentPlayback: Playback? get() = playback ?: lastPlayback
 
     fun setTempo(factor: Float) {
         val f = factor.coerceIn(MIN_TEMPO_FACTOR, MAX_TEMPO_FACTOR)
         if (f == _tempo.value) return
         _tempo.value = f
         Settings.setTempo(context, score, f)
-        soundChanged()
+        // the live player takes it at once
+        player?.tempoFactor = f.toDouble()
     }
 
     fun setHeard(id: String, heard: Boolean, parts: List<Part>) {
         val now = heardParts(_heard.value, shownParts, parts)
         val next = if (heard) now + id else now - id
-        if (next.isEmpty()) return
         _heard.value = next
         Settings.setHeardParts(context, score, next)
-        soundChanged()
+        // silent at once; heard again once the new parts' music is ready (at once when stopped)
+        if (next.isEmpty() || playback == null) player?.muted = next.isEmpty()
+        // all muted: the music goes on as it is, unheard
+        if (next.isNotEmpty()) soundChanged()
     }
 
     /** A page turned by hand during playback: let the reader look ahead or back. */
@@ -265,8 +274,7 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
         settling = null
         following?.cancel()
         following = null
-        player?.release()
-        player = null
+        player?.pause()
         playback = null
         followPaused = false
         _ahead.value = emptyList()
@@ -281,6 +289,8 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
 
     override fun onCleared() {
         stop()
+        player?.release()
+        player = null
         ScorePrecompute.playing = false
     }
 
@@ -290,12 +300,31 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
     }
 
     private fun resume() {
-        player?.start()
+        val p = player ?: return
+        p.play(p.position)
         _state.value = PlayState.PLAYING
         follow()
     }
 
-    private fun sound() = SoundSpec(audible = _heard.value, tempo = _tempo.value.toDouble())
+    private fun setLoop(next: Loop) {
+        _loop.value = next
+        player?.setLoop(next.on, next.start, next.b)
+    }
+
+    // nothing heard: the music of the parts shown, which the player keeps silent
+    private fun sound() = SoundSpec(audible = _heard.value?.ifEmpty { null }, tempo = _tempo.value.toDouble())
+
+    // the music for the live player: at the written tempo, which the player scales as it goes
+    private fun liveSound() = sound().copy(tempo = 1.0)
+
+    // the player, made once (its sound bank is read the first time)
+    private suspend fun livePlayer(): LivePlayer = player ?: withContext(Dispatchers.Default) {
+        LivePlayer(SoundBank.load(context))
+    }.also { made ->
+        made.onEnd = { viewModelScope.launch { onEnd() } }
+        made.muted = _heard.value?.isEmpty() == true
+        player = made
+    }
 
     // the highlight and the page go to the notes at [quarters], without playing
     private fun showNotesAt(pb: Playback, quarters: Double) {
@@ -306,24 +335,6 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
         }
     }
 
-    private suspend fun preparePlayer(pb: Playback): MediaPlayer {
-        val midi = withContext(Dispatchers.IO) {
-            File(context.cacheDir, "playback-${midiFiles++ % 2}.mid").apply { writeBytes(pb.midi) }
-        }
-        val next = MediaPlayer()
-        try {
-            withContext(Dispatchers.IO) {
-                next.setDataSource(midi.absolutePath)
-                next.prepare()
-            }
-        } catch (e: Exception) {
-            next.release()
-            throw e
-        }
-        next.setOnCompletionListener { onEnd() }
-        return next
-    }
-
     private fun start(onScreen: Set<String>) {
         val pages = pages ?: return
         // only one start at a time: two quick taps must not end up with two players
@@ -332,7 +343,7 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
         _failed.value = false
         starting = viewModelScope.launch {
             try {
-                val pb = pages.playback(sound()) ?: run {
+                val pb = pages.playback(liveSound()) ?: run {
                     stop()
                     _failed.value = true
                     return@launch
@@ -342,14 +353,15 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
                     ?: loop.a?.takeIf { loop.on }
                     ?: pb.onsets.firstOrNull { o -> o.notes.any { it in onScreen } }?.quarters
                     ?: 0.0
-                val next = preparePlayer(pb)
-                if (!isActive) {
-                    next.release()
-                    return@launch
-                }
-                if (from > 0) next.seekTo(pb.msExact(from).toInt())
-                next.start()
-                player = next
+                val song = withContext(Dispatchers.Default) { MidiSong.read(pb.midi) }
+                val next = livePlayer()
+                // the samples are read now, not by the first notes on the audio thread
+                withContext(Dispatchers.Default) { next.warm(song) }
+                if (!isActive) return@launch
+                next.tempoFactor = _tempo.value.toDouble()
+                next.setLoop(loop.on, loop.start, loop.b)
+                next.setSong(song)
+                next.play(from)
                 playback = pb
                 lastPlayback = pb
                 position = from
@@ -367,80 +379,36 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
         }
     }
 
-    // A new tempo or new parts heard need a new MIDI, rewritten in milliseconds. Once the taps
-    // settle, a new player is prepared while the music goes on, then takes over at the next
-    // barline (the next notes when no barline is left), as a musician would: nothing is played
-    // twice and nothing is cut in the middle of a bar. Stopped or paused, the new player simply
-    // waits where the old one was.
+    // New parts heard: the MIDI is written again (a few milliseconds) once the taps settle, and
+    // the live player takes it where the music is, without a gap.
     private fun soundChanged() {
         settling?.cancel()
-        if (player == null) return
+        if (playback == null) return
         settling = viewModelScope.launch {
             delay(SETTLE_MS.milliseconds)
             val pages = pages ?: return@launch
-            var next: MediaPlayer? = null
             try {
-                // without a layout the old player keeps playing
-                val pb = pages.playback(sound()) ?: return@launch
-                val ready = preparePlayer(pb).also { next = it }
-                val old = player
-                val oldPb = playback
-                if (old == null || oldPb == null) return@launch
-                var at = oldPb.quartersAt(old.currentPosition.toLong())
-                if (old.isPlaying) {
-                    // the next barline far enough ahead to seek and start in time
-                    val ahead = oldPb.quartersAt(old.currentPosition.toLong() + SWITCH_LEAD_MS)
-                    at = oldPb.bars.firstOrNull { it >= ahead }
-                        ?: oldPb.onsets.getOrNull(oldPb.onsetIndexAt(ahead) + 1)?.quarters
-                        ?: ahead
-                    ready.seekTo(pb.msExact(at).toInt())
-                    val due = oldPb.msExact(at) - START_LATENCY_MS
-                    while (old.isPlaying && old.currentPosition < due) delay(SWITCH_POLL_MS.milliseconds)
-                }
-                if (old.isPlaying) {
-                    ready.start()
-                    // the old player fades out in a few steps: cut at once, a held note clicks
-                    for (step in FADE_STEPS - 1 downTo 0) {
-                        val v = step.toFloat() / FADE_STEPS
-                        old.setVolume(v, v)
-                        delay((FADE_MS / FADE_STEPS).milliseconds)
-                    }
-                } else {
-                    at = oldPb.quartersAt(old.currentPosition.toLong())
-                    ready.seekTo(pb.msExact(at).toInt())
-                }
-                old.release()
-                next = null
-                player = ready
+                val pb = pages.playback(liveSound()) ?: return@launch
+                val song = withContext(Dispatchers.Default) { MidiSong.read(pb.midi).also { player?.warm(it) } }
+                if (playback == null) return@launch
+                player?.setSong(song)
+                player?.muted = _heard.value?.isEmpty() == true
                 playback = pb
                 lastPlayback = pb
-                position = at
-                if (ready.isPlaying) follow()
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                // the old player goes on: better the old tempo than silence
-                Log.e(LOG_TAG, "new sound could not be prepared: ${e::class.simpleName}: ${e.message}", e)
+                // the old parts go on: better than silence
+                Log.e(LOG_TAG, "new parts could not be prepared: ${e::class.simpleName}: ${e.message}", e)
             } finally {
-                // cut short (stopped, or another change): the player made for nothing goes
-                next?.release()
                 if (settling === coroutineContext[Job]) settling = null
             }
         }
     }
 
-    // the end of the music: around the loop again, or stop
+    // the end of the music (the loop wraps in the player itself)
     private fun onEnd() {
-        val loop = _loop.value
-        val p = player
-        val pb = playback
-        if (loop.on && p != null && pb != null) {
-            p.seekTo(pb.msExact(loop.start).toInt())
-            p.start()
-            follow()
-        } else {
-            stop()
-        }
+        if (playback != null) stop()
     }
 
     private fun follow() {
@@ -450,14 +418,8 @@ class PlaybackViewModel(app: Application, private val score: String) : AndroidVi
             while (isActive) {
                 val p = player ?: break
                 val pb = playback ?: break
-                if (!p.isPlaying) break
-                position = pb.quartersAt(p.currentPosition.toLong())
-                val loop = _loop.value
-                val end = loop.b
-                if (loop.on && end != null && position >= end) {
-                    p.seekTo(pb.msExact(loop.start).toInt())
-                    position = loop.start
-                }
+                if (!p.playing) break
+                position = p.position
                 val index = pb.onsetIndexAt(position)
                 if (index != last && index >= 0) {
                     last = index
@@ -488,13 +450,3 @@ fun Playback.notesOfBar(bar: Int): List<String>? =
 fun Playback.notesAhead(quarters: Double, bars: Int): List<String>? =
     if (bars <= 0) null else notesOfBar(barAt(quarters) + bars) ?: onsets.lastOrNull()?.notes
 
-/**
- * Audio time of the score position [quarters], between two notes too: `msAt` goes back to the
- * last note started, which would replay it when the music takes over at a new tempo.
- */
-private fun Playback.msExact(quarters: Double): Long {
-    val ms0 = msAt(quarters)
-    val q0 = quartersAt(ms0)
-    val q1 = quartersAt(ms0 + 1000)
-    return if (q1 > q0) ms0 + ((quarters - q0) / (q1 - q0) * 1000).toLong() else ms0
-}

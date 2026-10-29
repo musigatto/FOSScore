@@ -31,6 +31,12 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // the sound bank is read in place, mapped from the APK: it must be stored uncompressed (its
+    // samples are compressed already, in Ogg Vorbis)
+    androidResources {
+        noCompress += "sf3"
+    }
+
     lint {
         // Translations follow the code at their own pace (contributors, Crowdin): a string not
         // translated yet shows in English, a key left in a translation is never shown. Reported,

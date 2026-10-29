@@ -122,6 +122,13 @@ class PlaybackAndOptionsTest {
     }
 
     @Test
+    fun aRepeatPlaysTheNotesOnThePageAgain() {
+        // Verovio names the notes of a repeat after the notes written once on the page
+        val timemap = """[{"qstamp":0,"tstamp":0,"on":["n1"]},{"qstamp":2,"tstamp":1000,"on":["n1-rend2","n2-rend2"]}]"""
+        assertEquals(listOf(listOf("n1"), listOf("n1", "n2")), Playback.onsetsOf(timemap).map { it.notes })
+    }
+
+    @Test
     fun aTranspositionMovesTheNotes() {
         val out = MidiEdit.edit(midi(), 1.0, semitones = 2)
         assertEquals(62, out[43].toInt())

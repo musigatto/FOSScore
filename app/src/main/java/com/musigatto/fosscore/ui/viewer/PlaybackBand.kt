@@ -34,6 +34,8 @@ import androidx.compose.ui.unit.dp
 import com.musigatto.fosscore.R
 import com.musigatto.fosscore.musicxml.PageGeometry
 import com.musigatto.fosscore.musicxml.Part
+import com.musigatto.fosscore.musicxml.Playback
+import kotlin.math.max
 
 // Material's 24 dp paths (play_arrow, pause, skip_previous, repeat), drawn with ToolIcon
 internal const val ICON_PLAY = "M8,5v14l11,-7z"
@@ -53,9 +55,10 @@ internal val BAND_BUTTON = 44.dp
 // the band holds − ♩ = N + and the options button from this width (a tablet, a phone in landscape)
 private val BAND_WITH_TEMPO_BUTTONS = 440.dp
 
-// the cursor: a light band over the notes being played and a dot on each notehead
-private val CURSOR_BAND = Color(0x3300A0FF)
-private val CURSOR_HEAD = Color(0x8800A0FF)
+// the playback bar: a line across the line of music being played, a little past its staves
+private val BAR_COLOR = Color(0xCCE53935)
+private const val BAR_WIDTH_SPACES = 0.4f
+private const val BAR_OVERHANG_SPACES = 1.5f
 
 /**
  * The playback band, in the bottom bar above the page dots: ⏮ (back to the start of the loop or
@@ -181,7 +184,8 @@ fun PlaybackOptionsOverlay(
         TempoBlock(bpm, minBpm..maxBpm, writtenBpm, onTempo)
         SectionLabel(stringResource(R.string.metronome_page_turns))
         TurnAheadRow(turnAhead, onTurnAhead)
-        if (parts.size > 1) {
+        // listed even when the score has one part (a PDF has no parts)
+        if (parts.isNotEmpty()) {
             SectionLabel(stringResource(R.string.heard_section_label))
             Column(
                 modifier = Modifier
@@ -190,13 +194,8 @@ fun PlaybackOptionsOverlay(
             ) {
                 parts.forEach { part ->
                     val isHeard = part.id in heard
-                    // the last part heard cannot be muted: the music would go silent
-                    OptionRow(
-                        part.name.ifBlank { part.id },
-                        isHeard,
-                        Role.Checkbox,
-                        enabled = !isHeard || heard.size > 1,
-                    ) { onHeard(part.id, !isHeard) }
+                    // every part can be muted: the bar then follows the music without sound
+                    OptionRow(part.name.ifBlank { part.id }, isHeard, Role.Checkbox) { onHeard(part.id, !isHeard) }
                 }
             }
         }
@@ -204,29 +203,85 @@ fun PlaybackOptionsOverlay(
 }
 
 /**
- * Draws the playback cursor for [notes] on a page whose [geometry] is in SVG units and which
- * covers [pageWidth] px from ([left], [top]): a band over the system, a dot on each notehead.
+ * Where the playback bar is on a page: [x], and the [top] and [bottom] lines of the line of music
+ * it crosses, with its staff [space]. SVG units.
  */
-fun DrawScope.drawPlaybackCursor(geometry: PageGeometry, notes: List<String>, left: Float, top: Float, pageWidth: Float) {
-    val heads = notes.mapNotNull { geometry.head(it) }
-    if (heads.isEmpty()) return
-    val k = pageWidth / geometry.width
-    val space = heads.first().space * k
-    val l = left + heads.minOf { it.x } * k - space
-    val r = left + heads.maxOf { it.x } * k + space
-    val t = top + heads.minOf { it.top } * k - 2 * space
-    val b = top + heads.maxOf { it.bottom } * k + 2 * space
-    drawRect(CURSOR_BAND, Offset(l, t), Size(r - l, b - t))
-    heads.forEach { h -> drawCircle(CURSOR_HEAD, radius = space * 0.8f, center = Offset(left + h.x * k, top + h.y * k)) }
+class BarSpot(val x: Float, val top: Float, val bottom: Float, val space: Float, internal val lineEnd: Float = x)
+
+/**
+ * The way the playback bar goes over one page laid out as [geometry]: through the notes of each
+ * onset of [playback] on the page, gliding from one to the next at the speed of the music, and
+ * to the end of the line after the last notes of a line. An onset of hidden notes alone (the
+ * line of lyrics kept for a part not shown) has nothing to point at: the bar glides past it.
+ */
+class BarPath(private val playback: Playback, private val geometry: PageGeometry) {
+    /** The page's width in SVG units. */
+    val width: Float get() = geometry.width
+
+    private val onsets = playback.onsets
+    // whether each onset is on this page (hidden notes included), and where its notes are drawn
+    private val onPage = BooleanArray(onsets.size) { i -> onsets[i].notes.any { it in geometry.noteIds } }
+    private val spots = Array(onsets.size) { i ->
+        onsets[i].notes.mapNotNull { geometry.head(it) }.takeIf { it.isNotEmpty() }?.let { heads ->
+            BarSpot(heads.minOf { it.x }, heads.first().top, heads.first().bottom, heads.first().space, heads.first().lineEnd)
+        }
+    }
+
+    /** Where the bar is with the music at [quarters]; null when the music is not on this page. */
+    fun at(quarters: Double): BarSpot? {
+        var i = playback.onsetIndexAt(quarters)
+        if (i < 0 || !onPage[i]) return null
+        // back to the last notes drawn, past onsets of hidden notes
+        while (i >= 0 && onPage[i] && spots[i] == null) i--
+        if (i < 0 || !onPage[i]) return null
+        val here = spots[i] ?: return null
+        // on to the next notes drawn on this page, or to where the music leaves it
+        var j = i + 1
+        while (j < onsets.size && onPage[j] && spots[j] == null) j++
+        val to = onsets.getOrNull(j)?.quarters ?: return here
+        val there = if (onPage[j]) spots[j] else null
+        val from = onsets[i].quarters
+        // the next notes further on the same line, else the end of the line (a new line, a
+        // repeat going back, another page)
+        val toX = if (there != null && there.top == here.top && there.x >= here.x) there.x else max(here.x, here.lineEnd)
+        val f = if (to > from) ((quarters - from) / (to - from)).toFloat().coerceIn(0f, 1f) else 0f
+        return BarSpot(here.x + (toX - here.x) * f, here.top, here.bottom, here.space)
+    }
 }
 
-/** The cursor over a bitmap drawn with ContentScale.Fit in a box of this canvas's size. */
+/**
+ * Draws the playback bar at [spot] on a page [width] SVG units wide, which covers [pageWidth] px
+ * from ([left], [top]).
+ */
+fun DrawScope.drawPlaybackBar(spot: BarSpot, width: Float, left: Float, top: Float, pageWidth: Float) {
+    val k = pageWidth / width
+    val space = spot.space * k
+    val x = left + spot.x * k
+    val t = top + spot.top * k - BAR_OVERHANG_SPACES * space
+    val b = top + spot.bottom * k + BAR_OVERHANG_SPACES * space
+    val w = BAR_WIDTH_SPACES * space
+    drawRect(BAR_COLOR, Offset(x - w / 2, t), Size(w, b - t))
+}
+
+/**
+ * The playback bar over a bitmap drawn with ContentScale.Fit in a box of this canvas's size,
+ * where [quarters] says the music is (read while drawing, so the bar moves without the screen
+ * being composed again); [keep] leaves out the bar where the page is not shown.
+ */
 @Composable
-fun FitPlaybackCursor(geometry: PageGeometry, notes: List<String>, bitmapWidth: Int, bitmapHeight: Int, modifier: Modifier) {
+fun FitPlaybackBar(
+    path: BarPath,
+    quarters: () -> Double?,
+    bitmapWidth: Int,
+    bitmapHeight: Int,
+    modifier: Modifier,
+    keep: (BarSpot) -> Boolean = { true },
+) {
     Canvas(modifier) {
+        val spot = quarters()?.let { path.at(it) }?.takeIf(keep) ?: return@Canvas
         val fit = minOf(size.width / bitmapWidth, size.height / bitmapHeight)
         val dx = (size.width - bitmapWidth * fit) / 2
         val dy = (size.height - bitmapHeight * fit) / 2
-        drawPlaybackCursor(geometry, notes, dx, dy, bitmapWidth * fit)
+        drawPlaybackBar(spot, path.width, dx, dy, bitmapWidth * fit)
     }
 }
