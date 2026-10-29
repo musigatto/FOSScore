@@ -19,4 +19,4 @@ jobs:
       # android-actions/setup-android@v3 está roto: intenta instalar el paquete "tools", retirado del SDK.
       - uses: gradle/actions/setup-gradle@v4
       - name: Build, lint y tests
-        run: ./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest --no-daemon
+        run: ./gradlew :app:assembleDebug :app:lintDebug :app:testDebugUnitTest :musicxml:testDebugUnitTest --no-daemon
