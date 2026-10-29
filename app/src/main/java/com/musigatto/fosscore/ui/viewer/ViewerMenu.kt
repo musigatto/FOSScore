@@ -232,8 +232,9 @@ fun ScoreLayoutOverlay(
             onKeepHiddenLyrics(!layout.keepHiddenLyrics)
         }
 
-        // a score with one part has nothing to choose
-        if (parts.size > 1) {
+        // listed even when the score has one part, its box greyed out: the user sees what the
+        // score is made of (a PDF has no parts)
+        if (parts.isNotEmpty()) {
             SectionLabel(stringResource(R.string.parts_section_label))
             val shown = layout.partsShown(parts)
             Column(
