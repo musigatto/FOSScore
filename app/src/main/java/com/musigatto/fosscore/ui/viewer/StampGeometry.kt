@@ -103,8 +103,9 @@ fun normalizedToPx(n: Offset, fit: RectPx): Offset =
 fun pxToNormalized(p: Offset, fit: RectPx): Offset =
     Offset((p.x - fit.left) / fit.width, (p.y - fit.top) / fit.height)
 
-// x/y = the stamp's center, as a share of the page; the box may stick out past the edges
-// (a stamp half off the page is fine), but the center is always kept inside.
+// x/y = the stamp's center, as a share of the page. Placement and dragging keep the whole box
+// inside the sheet (a stamp cut in half by the edge is not what was placed); the coercion here
+// still guards stamps saved by older versions.
 fun stampRect(stamp: Stamp, fit: RectPx): RectPx {
     val side = stamp.size.coerceIn(MIN_STAMP_SIZE, MAX_STAMP_SIZE) * fit.height
     val center = normalizedToPx(
@@ -116,6 +117,19 @@ fun stampRect(stamp: Stamp, fit: RectPx): RectPx {
 
 fun hitStamp(pos: Offset, stamps: List<Stamp>, fit: RectPx): Stamp? =
     stamps.lastOrNull { stampRect(it, fit).contains(pos) }
+
+/**
+ * The centre a stamp needs so its WHOLE square stays on the sheet (placement and drag). Placing
+ * by the raw touch point left half the stamp off the page, and dragging clamped the centre only,
+ * so the box shrank against the edge (issue: "se convierte en una línea").
+ */
+fun stampCenterInside(x: Float, y: Float, sizeFrac: Float, fit: RectPx): Offset {
+    if (fit.width <= 0f || fit.height <= 0f) return Offset(x, y)
+    // the square is sized against the height, so its half in each axis differs
+    val halfX = (sizeFrac * fit.height / 2f / fit.width).coerceAtMost(0.5f)
+    val halfY = (sizeFrac / 2f).coerceAtMost(0.5f)
+    return Offset(x.coerceIn(halfX, 1f - halfX), y.coerceIn(halfY, 1f - halfY))
+}
 
 // Selection box handles: 4 little squares on the corners, just OUTSIDE the box (as in any
 // editor) so dragging inside still moves it instead of resizing it by mistake. Strokes use them;

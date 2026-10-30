@@ -241,12 +241,14 @@ internal fun Modifier.pageGestures(
                     }
                 }
             }
-            if (currentEditing && currentCanEdit && currentEraserTool) {
+            if (currentEditing && currentCanEdit && currentEraserTool && !onMatte) {
                 eraserActive = true
                 eraserPath.add(downF)
                 onInkPreview(listOf(downF))
             }
-            if (currentEditing && currentCanEdit && currentDrawingTool) {
+            // a stroke that starts on the matte is no stroke at all: nothing is drawn, and the
+            // release branch stands the pen down (it reads as a tap on the matte)
+            if (currentEditing && currentCanEdit && currentDrawingTool && !onMatte) {
                 inkActive = true
                 inkPts.add(downF)
                 onInkPreview(listOf(downF))
@@ -462,7 +464,19 @@ internal fun Modifier.pageGestures(
                         // around the box center. the factor is worked out from the
                         // starting position, never accumulated
                         val tracking = pressed.firstOrNull { it.id == down.id } ?: pressed.first()
-                        val f = scaleFactor(rz.center, rz.startPos, fitPoint(tracking.position))
+                        val f0 = scaleFactor(rz.center, rz.startPos, fitPoint(tracking.position))
+                        // growing stops when the far corner reaches the sheet: a stretch near the
+                        // border must not push the word (or hide part of it) outside the page
+                        var fMax = Float.MAX_VALUE
+                        rz.ptsPx.flatten().forEach { p ->
+                            val dx = p.x - rz.center.x
+                            val dy = p.y - rz.center.y
+                            if (dx > 0f) fMax = minOf(fMax, (currentHitFit.width - rz.center.x) / dx)
+                            else if (dx < 0f) fMax = minOf(fMax, rz.center.x / -dx)
+                            if (dy > 0f) fMax = minOf(fMax, (currentHitFit.height - rz.center.y) / dy)
+                            else if (dy < 0f) fMax = minOf(fMax, rz.center.y / -dy)
+                        }
+                        val f = f0.coerceAtMost(fMax).coerceAtLeast(0f)
                         scaleF = f
                         editor.dragStrokes = rz.strokes.mapIndexed { i, st ->
                             st.copy(
@@ -484,16 +498,13 @@ internal fun Modifier.pageGestures(
                         val m = pxToNormalized(fitPoint(tracking.position), currentHitFit) -
                             pxToNormalized(moveStrokeLastPos, currentHitFit)
                         moveStrokeLastPos = fitPoint(tracking.position)
+                        // the word moves as a block: the delta is limited to the box it occupies,
+                        // so the far edge stops at the sheet instead of every point being pinned
+                        // to it (that flattened the word into a line against the border)
+                        val d = deltaInside(movingStrokes.flatMap { decodePoints(it.points) }, m)
                         val ns = movingStrokes.map { st ->
                             st.copy(
-                                points = encodePoints(
-                                    decodePoints(st.points).map {
-                                        Offset(
-                                            (it.x + m.x).coerceIn(0f, 1f),
-                                            (it.y + m.y).coerceIn(0f, 1f)
-                                        )
-                                    }
-                                )
+                                points = encodePoints(decodePoints(st.points).map { it + d })
                             )
                         }
                         movingStrokes = ns
@@ -510,10 +521,11 @@ internal fun Modifier.pageGestures(
                         val m = pxToNormalized(fitPoint(tracking.position), currentHitFit) -
                             pxToNormalized(moveTrackingPos, currentHitFit)
                         moveTrackingPos = fitPoint(tracking.position)
-                        val ns = movingStamp.copy(
-                            x = (movingStamp.x + m.x).coerceIn(0f, 1f),
-                            y = (movingStamp.y + m.y).coerceIn(0f, 1f)
+                        // the whole stamp stays on the page, not just its centre
+                        val c = stampCenterInside(
+                            movingStamp.x + m.x, movingStamp.y + m.y, movingStamp.size, currentHitFit
                         )
+                        val ns = movingStamp.copy(x = c.x, y = c.y)
                         movingStamp = ns
                         editor.dragStamp = ns
                         prevCentroid = centroid(pressed)

@@ -72,8 +72,30 @@ class StampGeometryTest {
     }
 
     @Test
-    fun stampPxRoundTripsAndClampsToPageRange() {
-        val fit = fitOf(750f, 1000f, 0.75f)
+    fun stampDraggedToTheEdgeKeepsItsWholeBox() {
+        val fit = fitOf(800f, 1000f, 1.5f)
+        val size = 0.1f
+        // a drag past the corner: the centre is pulled back until the square fits
+        val c = stampCenterInside(0.99f, 0.01f, size, fit)
+        val r = stampRect(stamp(c.x, c.y, size), fit)
+        assertTrue(r.left >= fit.left - 1e-3f)
+        assertTrue(r.top >= fit.top - 1e-3f)
+        assertTrue(r.left + r.width <= fit.left + fit.width + 1e-3f)
+        assertTrue(r.top + r.height <= fit.top + fit.height + 1e-3f)
+    }
+
+    @Test
+    fun stampLargerThanThePageStaysCenteredInsteadOfCrashing() {
+        // size is capped by MAX_STAMP_SIZE, but a page can be narrower than that: the clamp must
+        // not build a reversed range (coerceIn would throw)
+        val fit = fitOf(200f, 1000f, 0.2f)
+        val c = stampCenterInside(0.99f, 0.99f, MAX_STAMP_SIZE, fit)
+        assertTrue(c.x.isFinite() && c.y.isFinite())
+        assertEquals(0.5f, c.x, 1e-3f)
+    }
+
+    @Test
+    fun stampPxRoundTripsAndClampsToPageRange() {        val fit = fitOf(750f, 1000f, 0.75f)
         val frac = stampSizePxToFrac(DEFAULT_STAMP_PX, fit)
         assertEquals(DEFAULT_STAMP_PX, stampSizeFracToPx(frac, fit), 1e-3f)
         // what draws and what measures share one fraction: the slider cannot lie

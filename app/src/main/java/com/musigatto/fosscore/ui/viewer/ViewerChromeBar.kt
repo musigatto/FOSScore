@@ -129,7 +129,7 @@ internal fun AnnotationBar(
         // rest of the width.
         //
         // This row is the top bar while annotating (the title bar steps aside), so it carries the
-        // status bar inset and it is measured with it: the page starts below the whole row.
+        // status bar inset, and it is measured with it: the page starts below the whole row.
         Row(
             modifier = Modifier
                 .fillMaxWidth()

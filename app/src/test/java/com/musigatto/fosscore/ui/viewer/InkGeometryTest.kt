@@ -24,8 +24,25 @@ class InkGeometryTest {
     }
 
     @Test
-    fun penWidthPxRoundTripsAndClampsToPageRange() {
-        val fit = RectPx(0f, 0f, 750f, 1000f)
+    fun draggingAWordToTheEdgeKeepsItsBoxOnThePage() {
+        // a word drawn near the right edge; a big drag to the right must stop at the border
+        val word = listOf(Offset(0.70f, 0.40f), Offset(0.90f, 0.40f), Offset(0.90f, 0.60f))
+        val d = deltaInside(word, Offset(0.5f, 0f))
+        assertEquals(0.1f, d.x, 1e-4f)
+        assertEquals(0f, d.y, 1e-4f)
+        // and the word keeps its width (no single point pinned to the edge)
+        val moved = word.map { it + d }
+        assertEquals(0.20f, moved.maxOf { it.x } - moved.minOf { it.x }, 1e-4f)
+    }
+
+    @Test
+    fun deltaInsideLeavesAFreeMoveAlone() {
+        val word = listOf(Offset(0.3f, 0.3f), Offset(0.5f, 0.5f))
+        assertEquals(Offset(0.1f, -0.1f), deltaInside(word, Offset(0.1f, -0.1f)))
+    }
+
+    @Test
+    fun penWidthPxRoundTripsAndClampsToPageRange() {        val fit = RectPx(0f, 0f, 750f, 1000f)
         assertEquals(DEFAULT_PEN_PX, penWidthPxToFrac(DEFAULT_PEN_PX, fit) * fit.height, 1e-4f)
         // página baja: manda el tope de fracción (2% del alto)
         assertEquals(MAX_STROKE_WIDTH, penWidthPxToFrac(MAX_PEN_PX, RectPx(0f, 0f, 100f, 300f)), 1e-6f)

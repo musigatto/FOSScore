@@ -50,6 +50,21 @@ const val WORD_GAP_Y_FRAC = 0.35f
 fun strokePointsPx(st: Stroke, fit: RectPx): List<Offset> =
     decodePoints(st.points).map { normalizedToPx(it, fit) }
 
+/**
+ * Limits a drag of a set of points so the WHOLE set stays on the page: the far edge stops at the
+ * border. Clamping each point instead pinned them all to the border and flattened the word into a
+ * line. Points are normalized (0..1) page coordinates.
+ */
+fun deltaInside(points: List<Offset>, d: Offset): Offset {
+    if (points.isEmpty()) return d
+    val loX = -points.minOf { it.x }
+    val loY = -points.minOf { it.y }
+    return Offset(
+        d.x.coerceIn(loX, max(loX, 1f - points.maxOf { it.x })),
+        d.y.coerceIn(loY, max(loY, 1f - points.maxOf { it.y })),
+    )
+}
+
 // box a set of strokes covers, the same one a single stroke gets
 private fun boxesOf(strokes: List<Stroke>, fit: RectPx): List<RectPx> =
     strokes.map { strokeSelectionRect(strokePointsPx(it, fit), it.width * fit.height) }

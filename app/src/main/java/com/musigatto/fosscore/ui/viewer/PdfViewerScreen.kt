@@ -344,7 +344,7 @@ fun PdfViewerScreen(
             return@LaunchedEffect
         }
         pageFlash = pageLabel
-        delay(1400)
+        delay(1400.milliseconds)
         pageFlash = ""
     }
 
@@ -682,7 +682,6 @@ fun PdfViewerScreen(
         val spec = screen.spec(scoreLayout, parts)
         // the other scores get laid out and drawn ahead for this screen too
         withContext(Dispatchers.IO) { MusicXmlPages.rememberScreen(context, screen) }
-        val before = pageCount
         try {
             val changed = paper.layoutPages(pages, spec)
             if (!changed) return@LaunchedEffect
@@ -695,7 +694,7 @@ fun PdfViewerScreen(
         }
         val after = pages.pageCount
         if (after > 0) {
-            currentPage = (if (before > 0) currentPage * after / before else currentPage)
+            currentPage = (if (pageCount > 0) currentPage * after / pageCount else currentPage)
                 .coerceIn(0, after - 1)
         }
         halfTurned = false
@@ -898,7 +897,7 @@ fun PdfViewerScreen(
                     modifier = Modifier.align(Alignment.Center),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Text(stringResource(error!!), style = MaterialTheme.typography.bodyLarge)
+                    Text(stringResource(error), style = MaterialTheme.typography.bodyLarge)
                     Spacer(Modifier.height(16.dp))
                     Button(onClick = onBack) { Text(stringResource(R.string.action_back)) }
                 }
@@ -980,15 +979,18 @@ fun PdfViewerScreen(
                             // stamping again.
                             activeSymbol = null
                             openPanel = null
+                            // the whole square lands on the page, never half of it off the edge
+                            val size = stampSizePxToFrac(placePx, hitFit)
+                            val centre = stampCenterInside(pos.x, pos.y, size, hitFit)
                             editor.placeStamp(
                                 currentPage,
                                 Stamp(
                                     sheetHash = sheetHash,
                                     page = currentPage,
                                     symbol = sym.name,
-                                    x = pos.x.coerceIn(0f, 1f),
-                                    y = pos.y.coerceIn(0f, 1f),
-                                    size = stampSizePxToFrac(placePx, hitFit),
+                                    x = centre.x,
+                                    y = centre.y,
+                                    size = size,
                                     color = activeColor
                                 ),
                                 PageEdit(pageStamps, pageStrokes),
