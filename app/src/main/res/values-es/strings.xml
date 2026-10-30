@@ -12,6 +12,7 @@
     <string name="action_redo">Rehacer</string>
     <string name="tool_pen">Lápiz</string>
     <string name="tool_eraser">Goma</string>
+    <string name="tool_select">Seleccionar</string>
     <string name="search_label">Buscar</string>
     <string name="library_title">Biblioteca</string>
     <string name="empty_library">Aún no hay partituras. Usa el botón Importar.</string>
@@ -93,6 +94,11 @@
     <string name="stamp_double_flat">Doble bemol</string>
     <string name="menu_label">Menú</string>
     <string name="annotate_done">Hecho</string>
+    <string name="annotate_discard_title">¿Descartar los cambios?</string>
+    <string name="annotate_move_bar">Mover la barra</string>
+    <string name="annotate_discard_message">Se quitarán las marcas hechas desde que cogiste el lápiz.</string>
+    <string name="annotate_keep_editing">Seguir anotando</string>
+    <string name="annotate_discard">Descartar</string>
     <string name="menu_setlist">Setlist</string>
     <string name="menu_bookmarks">Marcadores</string>
     <string name="menu_display">Visualización</string>

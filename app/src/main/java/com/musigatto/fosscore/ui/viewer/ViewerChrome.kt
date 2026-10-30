@@ -82,8 +82,9 @@ private val NUMBER_FIELD_WIDTH = 112.dp
 
 /**
  * Title bar of the viewer, drawn over the page: the menu button on the left, the score and page in
- * the middle, and the edit toggle on the right (✎ to pick up the pen, ✓ to put it down). No state of
- * its own: everything comes in as a parameter and goes out as a lambda.
+ * the middle, and the edit toggle on the right (✎ to pick up the pen). While annotating the toggle
+ * steps aside: ✓ lives at the end of the annotation bar, which is where the tools are (issue #50).
+ * No state of its own: everything comes in as a parameter and goes out as a lambda.
  *
  * The row deliberately has NO clickable full-width background: it would eat the page taps in the gaps
  * between pills, which are the navigation (spec §3).
@@ -135,20 +136,19 @@ fun ViewerTitleBar(
                     }
                 }
             }
-            // edit toggle, always in sight: ✎ picks up the pen, ✓ puts it down. The accent container
-            // is the M3 "active" tone, and it reads from across the room
-            Spacer(Modifier.width(8.dp))
-            Pill(
-                color = if (editing) MaterialTheme.colorScheme.primaryContainer
-                else MaterialTheme.colorScheme.surface,
-            ) {
-                PillEntry(
-                    if (editing) "✓" else "✎",
-                    stringResource(if (editing) R.string.annotate_done else R.string.action_edit),
-                    compact = compact,
-                    selected = editing,
-                    onClick = onToggleEditing,
-                )
+            // the pen is picked up here and put down with ✓ at the end of the annotation bar (spec
+            // §5 row 1): while annotating the toggle steps aside instead of meaning something else
+            // (issue #50). forScore does the same: its own row 1 replaces the title bar.
+            if (!editing) {
+                Spacer(Modifier.width(8.dp))
+                Pill {
+                    PillEntry(
+                        "✎",
+                        stringResource(R.string.action_edit),
+                        compact = compact,
+                        onClick = onToggleEditing,
+                    )
+                }
             }
         }
     }

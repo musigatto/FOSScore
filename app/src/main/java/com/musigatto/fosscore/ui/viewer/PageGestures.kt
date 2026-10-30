@@ -401,8 +401,18 @@ internal fun Modifier.pageGestures(
                             if (isDoubleTap) {
                                 // already handled above: neither places a stamp nor turns the page
                             } else if (currentEditing && currentCanEdit) {
+                                // Select mode: a horizontal swipe turns the page, the same one
+                                // that works while reading. forScore turns from row 1 (‹ ›); this
+                                // is our own addition, so it is only active with no tool armed and
+                                // only at fit, where a one-finger drag is not a pan.
+                                val isSwipe = !currentStampArmed &&
+                                    zoom.transform.scale <= 1f &&
+                                    totalPan.getDistance() > swipeThresholdPx &&
+                                    abs(totalPan.x) > abs(totalPan.y)
                                 // tap while editing: places the active stamp on the point touched
-                                if (!currentStampArmed) {
+                                if (isSwipe) {
+                                    if (totalPan.x < 0f) onTurn(PageTurn.NEXT) else onTurn(PageTurn.PREV)
+                                } else if (!currentStampArmed) {
                                     // no tool: just deselect
                                     editor.clearSelection()
                                 } else if (currentHash != null &&

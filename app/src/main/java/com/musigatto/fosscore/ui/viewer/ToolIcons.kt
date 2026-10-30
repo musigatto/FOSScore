@@ -41,6 +41,34 @@ internal const val ICON_REDO =
 internal const val ICON_TRASH =
     "M6,19c0,1.1,0.9,2,2,2h8c1.1,0,2,-0.9,2,-2V7H6v12zM19,4h-3.5l-1,-1h-5l-1,1H5v2h14V4z"
 
+internal const val ICON_CHECK =
+    "M9,16.17L4.83,12l-1.42,1.41L9,19 21,7l-1.41,-1.41z"
+
+internal const val ICON_CLOSE =
+    "M19,6.41L17.59,5 12,10.59 6.41,5 5,6.41 10.59,12 5,17.59 6.41,19 12,13.41 17.59,19 19,17.59 " +
+        "13.41,12z"
+
+// the selection tool of the annotation bar: a pointer, as in every drawing app (issue #50)
+internal const val ICON_SELECT =
+    "M6,2 L6,20.5 L10.4,16.3 L13.2,22 L16.2,20.5 L13.4,15 L19.5,15 Z"
+
+/** The grip of the annotation bar: three lines, the familiar "drag me" mark (spec §5, as forScore's ≡). */
+@Composable
+fun GripIcon(modifier: Modifier = Modifier) {
+    val color = LocalContentColor.current
+    Canvas(modifier.size(ICON_DP.dp)) {
+        val u = size.minDimension / ICON_UNITS
+        listOf(8f, 12f, 16f).forEach { y ->
+            drawLine(
+                color = color,
+                start = Offset(5f * u, y * u),
+                end = Offset(19f * u, y * u),
+                strokeWidth = 1.8f * u,
+            )
+        }
+    }
+}
+
 /** One of the 24 dp paths above, scaled to the button's text size. */
 @Composable
 fun ToolIcon(path: String, modifier: Modifier = Modifier) {

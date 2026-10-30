@@ -19,6 +19,25 @@ import kotlinx.coroutines.launch
 private const val UNDO_LEVELS = 10
 
 /**
+ * The pages as they were when the pen was picked up: ✕ (Cancel, issue #50) puts each one back.
+ * The undo history keeps the last [UNDO_LEVELS] changes and would not reach the start of a long
+ * session, so the session keeps its own copy: the first state of a page wins.
+ */
+internal class AnnotationSession {
+    private val starts = LinkedHashMap<Int, PageEdit>()
+
+    val hasChanges: Boolean get() = starts.isNotEmpty()
+
+    fun note(page: Int, before: PageEdit) {
+        starts.getOrPut(page) { before }
+    }
+
+    fun pages(): List<Pair<Int, PageEdit>> = starts.toList()
+
+    fun clear() = starts.clear()
+}
+
+/**
  * Everything that changes what is written on the page: the undo/redo stack, the ink and stamps the
  * DB has not confirmed yet, the selection and the object being moved. The viewer owns the page
  * data and the tools; this owns the edits, and it is the only place that writes them.
@@ -52,6 +71,9 @@ internal class AnnotationViewModel(
     var redoStack by mutableStateOf<List<Pair<Int, PageEdit>>>(emptyList())
         private set
 
+    // --- the pen-picked-up state of every page touched, for ✕ (issue #50) ---
+    private val session = AnnotationSession()
+
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
 
@@ -75,11 +97,40 @@ internal class AnnotationViewModel(
     fun pushUndo(current: PageEdit, page: Int) {
         undoStack = (undoStack + (page to current)).takeLast(UNDO_LEVELS)
         redoStack = emptyList()
+        // and the same state is where ✕ puts the page back: the first one of the session wins
+        session.note(page, current)
     }
 
     fun clearHistory() {
         undoStack = emptyList()
         redoStack = emptyList()
+    }
+
+    /** The session starts when the pen is picked up (issue #50). */
+    fun beginSession() = session.clear()
+
+    /** ✓ keeps everything: the session is over, its start is no longer needed. */
+    fun clearSession() = session.clear()
+
+    val hasSessionChanges: Boolean get() = session.hasChanges
+
+    /** ✕: every page touched since the pen was picked up goes back to its state then. */
+    fun cancelSession() {
+        val hash = sheetHash ?: return
+        if (!session.hasChanges) return
+        val pages = session.pages()
+        session.clear()
+        clearHistory()
+        clearSelection()
+        clearHidden()
+        // the pages are about to be replaced: nothing of the optimistic layer can stay on top
+        pendingInk = emptyList()
+        viewModelScope.launch {
+            pages.forEach { (page, edit) ->
+                stamps.restorePage(hash, page, edit.stamps)
+                strokes.restorePage(hash, page, edit.strokes)
+            }
+        }
     }
 
     fun clearSelection() {

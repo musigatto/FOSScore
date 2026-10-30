@@ -11,6 +11,7 @@
     <string name="action_redo">Rétablir</string>
     <string name="tool_pen">Stylo</string>
     <string name="tool_eraser">Gomme</string>
+    <string name="tool_select">Sélection</string>
     <string name="search_label">Rechercher</string>
     <string name="library_title">Bibliothèque</string>
     <string name="empty_library">Aucune partition pour l’instant. Ajoutez-en une avec le bouton Importer.</string>
@@ -103,6 +104,11 @@
     <string name="note_size_range">De %1$d %% à %2$d %%</string>
     <string name="menu_label">Menu</string>
     <string name="annotate_done">Terminé</string>
+    <string name="annotate_discard_title">Abandonner les modifications ?</string>
+    <string name="annotate_move_bar">Déplacer la barre</string>
+    <string name="annotate_discard_message">Les marques faites depuis la prise du stylet seront supprimées.</string>
+    <string name="annotate_keep_editing">Continuer</string>
+    <string name="annotate_discard">Abandonner</string>
     <string name="menu_setlist">Set list</string>
     <string name="menu_bookmarks">Signets</string>
     <string name="menu_display">Affichage</string>

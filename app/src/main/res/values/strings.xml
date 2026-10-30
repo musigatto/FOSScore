@@ -13,6 +13,7 @@
     <string name="action_redo">Redo</string>
     <string name="tool_pen">Pen</string>
     <string name="tool_eraser">Eraser</string>
+    <string name="tool_select">Select</string>
     <string name="search_label">Search</string>
     <string name="library_title">Library</string>
     <string name="empty_library">No sheets yet. Import one with the Import button.</string>
@@ -92,6 +93,11 @@
     <string name="stamp_double_flat">Double flat</string>
     <string name="menu_label">Menu</string>
     <string name="annotate_done">Done</string>
+    <string name="annotate_discard_title">Discard the changes?</string>
+    <string name="annotate_move_bar">Move the bar</string>
+    <string name="annotate_discard_message">The marks made since the pen was picked up will be removed.</string>
+    <string name="annotate_keep_editing">Keep editing</string>
+    <string name="annotate_discard">Discard</string>
     <string name="menu_setlist">Setlist</string>
     <string name="menu_bookmarks">Bookmarks</string>
     <string name="menu_display">Display</string>
