@@ -181,7 +181,8 @@ fun PlaybackOptionsOverlay(
         TempoBlock(bpm, minBpm..maxBpm, writtenBpm, onTempo)
         SectionLabel(stringResource(R.string.metronome_page_turns))
         TurnAheadRow(turnAhead, onTurnAhead)
-        if (parts.size > 1) {
+        // listed even when the score has one part, its box greyed out (a PDF has no parts)
+        if (parts.isNotEmpty()) {
             SectionLabel(stringResource(R.string.heard_section_label))
             Column(
                 modifier = Modifier
