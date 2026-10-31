@@ -46,7 +46,7 @@ internal class AnnotationSession {
  * optimistic delete) and a flow round trip would only add a hop.
  */
 internal class AnnotationViewModel(
-    private val sheetHash: String?,
+    private val sheetId: Long?,
     private val stamps: StampRepository,
     private val strokes: StrokeRepository,
 ) : ViewModel() {
@@ -116,7 +116,7 @@ internal class AnnotationViewModel(
 
     /** ✕: every page touched since the pen was picked up goes back to its state then. */
     fun cancelSession() {
-        val hash = sheetHash ?: return
+        val id = sheetId ?: return
         if (!session.hasChanges) return
         val pages = session.pages()
         session.clear()
@@ -127,8 +127,8 @@ internal class AnnotationViewModel(
         pendingInk = emptyList()
         viewModelScope.launch {
             pages.forEach { (page, edit) ->
-                stamps.restorePage(hash, page, edit.stamps)
-                strokes.restorePage(hash, page, edit.strokes)
+                stamps.restorePage(id, page, edit.stamps)
+                strokes.restorePage(id, page, edit.strokes)
             }
         }
     }
@@ -170,7 +170,7 @@ internal class AnnotationViewModel(
     }
 
     fun undo(page: Int, current: PageEdit) {
-        val hash = sheetHash ?: return
+        val id = sheetId ?: return
         val (target, edit) = undoStack.lastOrNull() ?: return
         undoStack = undoStack.dropLast(1)
         // what redo puts back is the state we are leaving behind
@@ -181,13 +181,13 @@ internal class AnnotationViewModel(
         clearHidden()
         keepOnlyInkOf(edit.strokes)
         viewModelScope.launch {
-            stamps.restorePage(hash, target, edit.stamps)
-            strokes.restorePage(hash, target, edit.strokes)
+            stamps.restorePage(id, target, edit.stamps)
+            strokes.restorePage(id, target, edit.strokes)
         }
     }
 
     fun redo(page: Int, current: PageEdit) {
-        val hash = sheetHash ?: return
+        val id = sheetId ?: return
         val (target, edit) = redoStack.lastOrNull() ?: return
         redoStack = redoStack.dropLast(1)
         if (target == page) undoStack = (undoStack + (target to current)).takeLast(UNDO_LEVELS)
@@ -195,8 +195,8 @@ internal class AnnotationViewModel(
         clearHidden()
         keepOnlyInkOf(edit.strokes)
         viewModelScope.launch {
-            stamps.restorePage(hash, target, edit.stamps)
-            strokes.restorePage(hash, target, edit.strokes)
+            stamps.restorePage(id, target, edit.stamps)
+            strokes.restorePage(id, target, edit.strokes)
         }
     }
 
@@ -278,10 +278,10 @@ internal class AnnotationViewModel(
 
     companion object {
         /** One editor per score: undo, ink and stamps belong to the score being read. */
-        fun factory(context: Context, sheetHash: String?) = viewModelFactory {
+        fun factory(context: Context, sheetId: Long?) = viewModelFactory {
             initializer {
                 val app = context.applicationContext as FOSScoreApp
-                AnnotationViewModel(sheetHash, app.stampRepository, app.strokeRepository)
+                AnnotationViewModel(sheetId, app.stampRepository, app.strokeRepository)
             }
         }
     }

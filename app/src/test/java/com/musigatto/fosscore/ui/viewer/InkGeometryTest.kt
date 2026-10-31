@@ -17,9 +17,9 @@ class InkGeometryTest {
     fun samplePointsDropsConsecutiveClosePoints() {
         val pts = listOf(Offset(0f, 0f), Offset(1f, 0f), Offset(1.5f, 0f), Offset(10f, 0f))
         val out = samplePoints(pts, 2f)
-        // se mide contra el ÚLTIMO punto conservado: (1,0) y (1.5,0) están a <2 del (0,0),
-        // así que solo entra el (10,0). La expectativa original (conservar el 1.5) contradecía
-        // la implementación y fallaba siempre (definición en InkGeometry: minDist del anterior).
+        // se mide contra el ├ÜLTIMO punto conservado: (1,0) y (1.5,0) est├ín a <2 del (0,0),
+        // as├¡ que solo entra el (10,0). La expectativa original (conservar el 1.5) contradec├¡a
+        // la implementaci├│n y fallaba siempre (definici├│n en InkGeometry: minDist del anterior).
         assertEquals(listOf(Offset(0f, 0f), Offset(10f, 0f)), out)
     }
 
@@ -44,9 +44,9 @@ class InkGeometryTest {
     @Test
     fun penWidthPxRoundTripsAndClampsToPageRange() {        val fit = RectPx(0f, 0f, 750f, 1000f)
         assertEquals(DEFAULT_PEN_PX, penWidthPxToFrac(DEFAULT_PEN_PX, fit) * fit.height, 1e-4f)
-        // página baja: manda el tope de fracción (2% del alto)
+        // p├ígina baja: manda el tope de fracci├│n (2% del alto)
         assertEquals(MAX_STROKE_WIDTH, penWidthPxToFrac(MAX_PEN_PX, RectPx(0f, 0f, 100f, 300f)), 1e-6f)
-        // alto 0 (aún sin maquetar): el guard evita NaN/Inf y deja el valor en rango
+        // alto 0 (a├║n sin maquetar): el guard evita NaN/Inf y deja el valor en rango
         val degenerate = penWidthPxToFrac(MIN_PEN_PX, RectPx(0f, 0f, 0f, 0f))
         assertTrue(degenerate.isFinite() && degenerate in MIN_STROKE_WIDTH..MAX_STROKE_WIDTH)
     }
@@ -101,7 +101,7 @@ class InkGeometryTest {
     // letter at x..x+40, y..y+40 in px at a 1000 px fit (the entity stores normalized points)
     private fun letter(id: Long, x: Float, y: Float = 0f) = Stroke(
         id = id,
-        sheetHash = "h",
+        sheetId = 1,
         page = 0,
         points = encodePoints(
             listOf(Offset(x, y), Offset(x, y + 40f), Offset(x + 40f, y))

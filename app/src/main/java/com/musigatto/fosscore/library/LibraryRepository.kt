@@ -83,7 +83,9 @@ class LibraryRepository(context: Context) {
                 composer = composer,
                 genre = "",
                 musicalKey = "",
-                tags = ""
+                tags = "",
+                format = format,
+                addedAt = System.currentTimeMillis()
             )
             val saved = sheet.copy(id = dao.insert(sheet))
             // a MusicXML score is laid out and drawn ahead while the user looks at its details
@@ -98,9 +100,11 @@ class LibraryRepository(context: Context) {
     suspend fun save(sheet: Sheet) = dao.update(sheet)
 
     suspend fun delete(sheet: Sheet) {
+        // the annotations hang on the sheet's id; the foreign keys cascade, and the explicit
+        // deletes keep this right even where they are not enforced
+        stampDao.deleteForSheet(sheet.id)
+        strokeDao.deleteForSheet(sheet.id)
         dao.delete(sheet)
-        stampDao.deleteForSheet(sheet.hash)
-        strokeDao.deleteForSheet(sheet.hash)
         try {
             File(sheet.path).delete()
         } catch (_: Exception) {

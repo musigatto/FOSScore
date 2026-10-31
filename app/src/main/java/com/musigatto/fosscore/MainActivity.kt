@@ -115,8 +115,14 @@ private val NavSaver = listSaver(
     }
 )
 
-internal fun Sheet.toSaveable(): List<Any> =
-    listOf(id, fileName, path, hash, title, composer, genre, musicalKey, tags)
+// The score's details travel with it across a rotation. A listSaver only carries non-null values,
+// so a field the row does not have yet goes as "" or 0 and comes back as null: 0 is never a real
+// tempo, duration or count, and no format or time signature is the empty string.
+internal fun Sheet.toSaveable(): List<Any> = listOf(
+    id, fileName, path, hash, title, composer, genre, musicalKey, tags,
+    format?.name.orEmpty(), tempoBpm ?: 0.0, beatUnit ?: 0, timeSignature.orEmpty(),
+    durationS ?: 0.0, openedAt ?: 0L, openCount ?: 0, addedAt ?: 0L,
+)
 
 internal fun sheetFromSaveable(v: List<Any>) = Sheet(
     id = v[0] as Long,
@@ -127,7 +133,15 @@ internal fun sheetFromSaveable(v: List<Any>) = Sheet(
     composer = v[5] as String,
     genre = v[6] as String,
     musicalKey = v[7] as String,
-    tags = v[8] as String
+    tags = v[8] as String,
+    format = (v[9] as String).takeIf { it.isNotEmpty() }?.let { SheetFormat.valueOf(it) },
+    tempoBpm = (v[10] as Double).takeIf { it != 0.0 },
+    beatUnit = (v[11] as Int).takeIf { it != 0 },
+    timeSignature = (v[12] as String).takeIf { it.isNotEmpty() },
+    durationS = (v[13] as Double).takeIf { it != 0.0 },
+    openedAt = (v[14] as Long).takeIf { it != 0L },
+    openCount = (v[15] as Int).takeIf { it != 0 },
+    addedAt = (v[16] as Long).takeIf { it != 0L },
 )
 
 @Composable
@@ -177,7 +191,7 @@ private fun FOSScoreNav(
                     onOpenLibrary = { nav = nav.copy(libraryOpen = true) },
                     themeMode = themeMode,
                     onToggleTheme = toggleTheme,
-                    sheetHash = sheet.hash
+                    sheetId = sheet.id
                 )
             }
         }

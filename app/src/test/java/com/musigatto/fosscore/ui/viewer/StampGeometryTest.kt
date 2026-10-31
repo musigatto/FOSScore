@@ -10,7 +10,7 @@ import org.junit.Test
 class StampGeometryTest {
     private val fitOf = { w: Float, h: Float, a: Float -> fitRect(w, h, a) }
     private fun stamp(x: Float = 0.5f, y: Float = 0.5f, size: Float = 0.1f) =
-        Stamp(sheetHash = "h", page = 0, symbol = "F", x = x, y = y, size = size)
+        Stamp(sheetId = 1, page = 0, symbol = "F", x = x, y = y, size = size)
 
     @Test
     fun landscapePageInPortraitSlotFitsByWidth() {

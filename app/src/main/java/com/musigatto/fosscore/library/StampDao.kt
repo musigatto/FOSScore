@@ -10,8 +10,8 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface StampDao {
     // one page only: see StrokeDao.observePage
-    @Query("SELECT * FROM stamps WHERE sheetHash = :hash AND page = :page ORDER BY id")
-    fun observePage(hash: String, page: Int): Flow<List<Stamp>>
+    @Query("SELECT * FROM stamps WHERE sheetId = :sheetId AND page = :page ORDER BY id")
+    fun observePage(sheetId: Long, page: Int): Flow<List<Stamp>>
 
     @Insert
     suspend fun insert(stamp: Stamp): Long
@@ -28,9 +28,9 @@ interface StampDao {
     @Delete
     suspend fun deleteAll(stamps: List<Stamp>)
 
-    @Query("DELETE FROM stamps WHERE sheetHash = :hash")
-    suspend fun deleteForSheet(hash: String)
+    @Query("DELETE FROM stamps WHERE sheetId = :sheetId")
+    suspend fun deleteForSheet(sheetId: Long)
 
-    @Query("DELETE FROM stamps WHERE sheetHash = :hash AND page = :page")
-    suspend fun deletePage(hash: String, page: Int)
+    @Query("DELETE FROM stamps WHERE sheetId = :sheetId AND page = :page")
+    suspend fun deletePage(sheetId: Long, page: Int)
 }

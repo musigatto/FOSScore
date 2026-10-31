@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 class StrokeRepository(context: Context) {
     private val dao = AppDatabase.get(context).strokeDao()
 
-    fun observe(hash: String, page: Int): Flow<List<Stroke>> = dao.observePage(hash, page)
+    fun observe(sheetId: Long, page: Int): Flow<List<Stroke>> = dao.observePage(sheetId, page)
 
     suspend fun insert(stroke: Stroke): Long = dao.insert(stroke)
 
@@ -19,11 +19,11 @@ class StrokeRepository(context: Context) {
     // the eraser cuts one stroke into pieces: the survivors go back in one by one
     suspend fun insertAll(strokes: List<Stroke>) = dao.insertAll(strokes)
 
-    suspend fun listBySheet(hash: String): List<Stroke> = dao.listBySheet(hash)
+    suspend fun listBySheet(sheetId: Long): List<Stroke> = dao.listBySheet(sheetId)
 
     // puts a page back from an undo snapshot: drops what is there, inserts the snapshot
-    suspend fun restorePage(hash: String, page: Int, strokes: List<Stroke>) {
-        dao.deletePage(hash, page)
+    suspend fun restorePage(sheetId: Long, page: Int, strokes: List<Stroke>) {
+        dao.deletePage(sheetId, page)
         dao.insertAll(strokes)
     }
 }

@@ -13,7 +13,7 @@ class EraserStampsTest {
 
     private val fit = RectPx(0f, 0f, 400f, 800f)
     private fun stamp(id: Long, x: Float, y: Float, size: Float = 0.05f) =
-        Stamp(id = id, sheetHash = "h", page = 0, symbol = "F", x = x, y = y, size = size)
+        Stamp(id = id, sheetId = 1, page = 0, symbol = "F", x = x, y = y, size = size)
 
     // two stamps near each other: one at (0.25, 0.5), one at (0.75, 0.5)
     private val page = listOf(stamp(1, 0.25f, 0.5f), stamp(2, 0.75f, 0.5f))

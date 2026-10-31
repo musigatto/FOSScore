@@ -71,9 +71,9 @@ class LibraryBackupTest {
     fun exportThenImportBringsBackTheLibrary() = runBlocking {
         val db = open()
         val file = pdf("some-uuid.pdf")
-        db.sheetDao().insert(sheet(file.path))
-        db.stampDao().insert(Stamp(sheetHash = HASH, page = 1, symbol = "FERMATA", x = 0.2f, y = 0.3f, size = 0.04f))
-        db.strokeDao().insert(Stroke(sheetHash = HASH, page = 2, points = "0.1;0.1|0.2;0.2", width = 0.003f))
+        val sheetId = db.sheetDao().insert(sheet(file.path))
+        db.stampDao().insert(Stamp(sheetId = sheetId, page = 1, symbol = "FERMATA", x = 0.2f, y = 0.3f, size = 0.04f))
+        db.strokeDao().insert(Stroke(sheetId = sheetId, page = 2, points = "0.1;0.1|0.2;0.2", width = 0.003f))
 
         val archive = ByteArrayOutputStream()
         val manifest = backup.export(db, archive)
@@ -95,8 +95,8 @@ class LibraryBackupTest {
         val sheet = restored.sheetDao().byHash(HASH)!!
         assertEquals(File(sheetsDir, "$HASH.pdf").path, sheet.path)
         assertArrayEquals(pdfBytes, File(sheet.path).readBytes())
-        assertEquals(1, restored.stampDao().observeBySheet(HASH).first().size)
-        assertEquals(1, restored.strokeDao().observeBySheet(HASH).first().size)
+        assertEquals(1, restored.stampDao().observePage(sheet.id, 1).first().size)
+        assertEquals(1, restored.strokeDao().observePage(sheet.id, 2).first().size)
         restored.close()
         // The library replaced by the import is kept.
         assertTrue(File(context.filesDir, "${LibraryBackup.SHEETS_BEFORE_IMPORT}/some-uuid.pdf").isFile)
@@ -151,8 +151,9 @@ class LibraryBackupTest {
 
         val db = open()
         assertEquals("Song", db.sheetDao().byHash(HASH)!!.title)
-        assertNull(db.stampDao().observeBySheet(HASH).first().single().color)
-        assertTrue(File(db.sheetDao().byHash(HASH)!!.path).isFile)
+        val sheet = db.sheetDao().byHash(HASH)!!
+        assertNull(db.stampDao().observePage(sheet.id, 1).first().single().color)
+        assertTrue(File(sheet.path).isFile)
         db.close()
     }
 

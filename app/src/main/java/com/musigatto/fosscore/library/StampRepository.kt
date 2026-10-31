@@ -6,7 +6,7 @@ import kotlinx.coroutines.flow.Flow
 class StampRepository(context: Context) {
     private val dao = AppDatabase.get(context).stampDao()
 
-    fun observe(hash: String, page: Int): Flow<List<Stamp>> = dao.observePage(hash, page)
+    fun observe(sheetId: Long, page: Int): Flow<List<Stamp>> = dao.observePage(sheetId, page)
 
     suspend fun insert(stamp: Stamp): Long = dao.insert(stamp)
 
@@ -17,8 +17,8 @@ class StampRepository(context: Context) {
     suspend fun deleteAll(stamps: List<Stamp>) = dao.deleteAll(stamps)
 
     // puts a page back from an undo snapshot: drops what is there, inserts the snapshot
-    suspend fun restorePage(hash: String, page: Int, stamps: List<Stamp>) {
-        dao.deletePage(hash, page)
+    suspend fun restorePage(sheetId: Long, page: Int, stamps: List<Stamp>) {
+        dao.deletePage(sheetId, page)
         dao.insertAll(stamps)
     }
 }

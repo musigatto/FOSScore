@@ -162,7 +162,7 @@ fun PdfViewerScreen(
     onOpenLibrary: () -> Unit = onBack,
     themeMode: ThemeMode,
     onToggleTheme: () -> Unit,
-    sheetHash: String? = null
+    sheetId: Long? = null
 ) {
     val context = LocalContext.current
     val configuration = LocalConfiguration.current
@@ -205,7 +205,7 @@ fun PdfViewerScreen(
     // (AnnotationViewModel). One per score, like the menu and the playback.
     val editor: AnnotationViewModel = viewModel(
         key = "annotation:$pdfUri",
-        factory = AnnotationViewModel.factory(context, sheetHash),
+        factory = AnnotationViewModel.factory(context, sheetId),
     )
     // how the pages show (two-up, half page, dim, invert, keep the screen on): one ViewModel for
     // every score, reading and writing the settings in one place
@@ -256,15 +256,15 @@ fun PdfViewerScreen(
 
     // one page's rows: the viewer draws one page, and re-reading the whole score on every stroke
     // made each stroke cost grow with the score
-    val stampsFlow = remember(sheetHash, currentPage) {
-        sheetHash?.let {
+    val stampsFlow = remember(sheetId, currentPage) {
+        sheetId?.let {
             (context.applicationContext as FOSScoreApp).stampRepository.observe(it, currentPage)
         } ?: flowOf(emptyList())
     }
     val stamps by stampsFlow.collectAsState(initial = emptyList())
 
-    val strokesFlow = remember(sheetHash, currentPage) {
-        sheetHash?.let {
+    val strokesFlow = remember(sheetId, currentPage) {
+        sheetId?.let {
             (context.applicationContext as FOSScoreApp).strokeRepository.observe(it, currentPage)
         } ?: flowOf(emptyList())
     }
@@ -351,22 +351,22 @@ fun PdfViewerScreen(
     // the second page of a spread. The viewer is reading, not editing, there, but its ink and its
     // stamps are drawn too: half of a two-up (or the top of a turned half page) would come out bare.
     val companion = if (spread && currentPage + 1 < pageCount) currentPage + 1 else null
-    val companionStampsFlow = remember(sheetHash, companion) {
-        if (sheetHash != null && companion != null) {
-            (context.applicationContext as FOSScoreApp).stampRepository.observe(sheetHash, companion)
+    val companionStampsFlow = remember(sheetId, companion) {
+        if (sheetId != null && companion != null) {
+            (context.applicationContext as FOSScoreApp).stampRepository.observe(sheetId, companion)
         } else flowOf(emptyList())
     }
     val companionStamps by companionStampsFlow.collectAsState(initial = emptyList())
-    val companionStrokesFlow = remember(sheetHash, companion) {
-        if (sheetHash != null && companion != null) {
-            (context.applicationContext as FOSScoreApp).strokeRepository.observe(sheetHash, companion)
+    val companionStrokesFlow = remember(sheetId, companion) {
+        if (sheetId != null && companion != null) {
+            (context.applicationContext as FOSScoreApp).strokeRepository.observe(sheetId, companion)
         } else flowOf(emptyList())
     }
     val companionStrokes by companionStrokesFlow.collectAsState(initial = emptyList())
 
     // ponytail: no annotations on MusicXML yet. They are stored per page, and a MusicXML page
     // changes with the screen and the music size; they need to be tied to measures first.
-    val canEdit = sheetHash != null && !format.isMusicXml && !branch.showTwoUp &&
+    val canEdit = sheetId != null && !format.isMusicXml && !branch.showTwoUp &&
         !(branch.showHalf && halfTurned)
 
     // marks and stamps of the current page, shared between the overlay and the gestures.
@@ -427,7 +427,7 @@ fun PdfViewerScreen(
         // the gate lives here, so it also covers the entry paths that are coming (Apple Pencil, long
         // press). Two-up or a turned half page is no reason to refuse: annotating goes back to one
         // page, below.
-        if (!editing && (sheetHash == null || format.isMusicXml)) return
+        if (!editing && (sheetId == null || format.isMusicXml)) return
         editing = !editing
         if (editing) {
             viewer.singlePage()
@@ -923,7 +923,7 @@ fun PdfViewerScreen(
                     editing = editing,
                     canEdit = canEdit,
                     page = currentPage,
-                    sheetHash = sheetHash,
+                    sheetId = sheetId,
                     pageFit = pageFit,
                     stamps = pageStamps,
                     strokes = pageStrokes,
@@ -973,7 +973,7 @@ fun PdfViewerScreen(
                     },
                     onPlaceStamp = { pos ->
                         val sym = activeSymbol
-                        if (sym != null && sheetHash != null) {
+                        if (sym != null && sheetId != null) {
                             // One stamp per arming: stand the tool down as soon as it is used,
                             // so the next tap outside the new stamp deselects instead of
                             // stamping again.
@@ -985,7 +985,7 @@ fun PdfViewerScreen(
                             editor.placeStamp(
                                 currentPage,
                                 Stamp(
-                                    sheetHash = sheetHash,
+                                    sheetId = sheetId,
                                     page = currentPage,
                                     symbol = sym.name,
                                     x = centre.x,

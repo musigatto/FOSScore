@@ -7,6 +7,7 @@ import androidx.room.testing.MigrationTestHelper
 import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import com.musigatto.fosscore.score.SheetFormat
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -48,13 +49,18 @@ class MigrationTest {
             db.insert(
                 "stamps", SQLiteDatabase.CONFLICT_ABORT,
                 ContentValues().apply {
-                    put("sheetHash", HASH)
+                    // from version 5 the annotations hang on the sheet's id, not on its hash
+                    if (version >= 5) put("sheetId", 1L) else put("sheetHash", HASH)
                     put("page", 1)
                     put("symbol", "FERMATA")
                     put("x", 0.25f)
                     put("y", 0.5f)
                     put("size", 0.04f)
                     if (version >= 3) put("color", RED)
+                    if (version >= 5) {
+                        put("bold", 0)
+                        put("italic", 0)
+                    }
                 }
             )
         }
@@ -62,10 +68,11 @@ class MigrationTest {
             db.insert(
                 "strokes", SQLiteDatabase.CONFLICT_ABORT,
                 ContentValues().apply {
-                    put("sheetHash", HASH)
+                    if (version >= 5) put("sheetId", 1L) else put("sheetHash", HASH)
                     put("page", 2)
                     put("points", "0.1;0.1|0.2;0.2")
                     put("width", 0.003f)
+                    if (version >= 5) put("groupId", 7L)
                 }
             )
         }
@@ -87,13 +94,33 @@ class MigrationTest {
                 assertNotNull("v$version: sheet lost", sheet)
                 assertEquals("v$version", "Song", sheet!!.title)
                 assertEquals("v$version", "duo, practice", sheet.tags)
-                val stamps = db.stampDao().observeBySheet(HASH).first()
+                // v5: the format stops being the extension
+                assertEquals("v$version", SheetFormat.PDF, sheet.format)
+
+                val stamps = db.stampDao().observePage(sheet.id, 1).first()
                 assertEquals("v$version: stamps", if (version >= 2) 1 else 0, stamps.size)
                 if (version >= 2) {
                     assertEquals("FERMATA", stamps[0].symbol)
+                    // the annotation follows the sheet now, not the file's hash
+                    assertEquals("v$version: stamp sheetId", sheet.id, stamps[0].sheetId)
                     // Version 2 had no colour: the theme colour (null) after the migration.
                     if (version >= 3) assertEquals(RED, stamps[0].color) else assertNull(stamps[0].color)
                 }
+
+                val strokes = db.strokeDao().observePage(sheet.id, 2).first()
+                assertEquals("v$version: strokes", if (version >= 4) 1 else 0, strokes.size)
+                if (version >= 4) {
+                    assertEquals("v$version: stroke sheetId", sheet.id, strokes[0].sheetId)
+                    // v5 gives old ink no group: it falls back to the geometric word box
+                    assertEquals("v$version: groupId", 0L, strokes[0].groupId)
+                }
+
+                // v5: the free text becomes tags, the genre as a genre
+                val tags = db.openHelper.readableDatabase
+                    .query("SELECT `name`, `kind` FROM `tags` ORDER BY `name`").use { c ->
+                        buildList { while (c.moveToNext()) add(c.getString(0) to c.getString(1)) }
+                    }
+                assertEquals("v$version: tags", listOf("Folk" to "GENRE", "duo" to "FREE", "practice" to "FREE"), tags)
             }
         }
     }
@@ -106,7 +133,7 @@ class MigrationTest {
             close()
         }
         withRoom { db ->
-            assertEquals(1, db.strokeDao().observeBySheet(HASH).first().size)
+            assertEquals(1, db.strokeDao().observePage(1L, 2).first().size)
         }
     }
 

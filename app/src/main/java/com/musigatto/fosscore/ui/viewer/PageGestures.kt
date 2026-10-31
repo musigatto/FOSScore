@@ -56,7 +56,7 @@ internal fun Modifier.pageGestures(
     editing: Boolean,
     canEdit: Boolean,
     page: Int,
-    sheetHash: String?,
+    sheetId: Long?,
     pageFit: RectPx,
     stamps: List<Stamp>,
     strokes: List<Stroke>,
@@ -97,7 +97,7 @@ internal fun Modifier.pageGestures(
     // score opened at, so ink written on page 6 was stored under page 8 and showed up there after
     // pressing Done.
     val currentPage by rememberUpdatedState(page)
-    val currentHash by rememberUpdatedState(sheetHash)
+    val currentSheetId by rememberUpdatedState(sheetId)
     val currentPageFit by rememberUpdatedState(pageFit)
     // where the page is centred in the viewport, and the pure fit rect (origin 0,0):
     // content work and zoom anchoring live in these coordinates
@@ -308,11 +308,11 @@ internal fun Modifier.pageGestures(
                             // threshold is a screen distance, so it scales with the zoom
                             val pts = samplePoints(inkPts, MIN_SAMPLE_DIST_PX / zoom.transform.scale)
                             onInkPreview(emptyList())
-                            // local copy: a delegated var cannot be smart cast to String
-                            val hash = currentHash
-                            if (pts.size >= 2 && !onMatte && hash != null && currentPageFit.width > 0f) {
-                                val s = Stroke(
-                                    sheetHash = hash,
+                            // local copy: a delegated var cannot be smart cast to Long
+                            val sheet = currentSheetId
+                            if (pts.size >= 2 && !onMatte && sheet != null && currentPageFit.width > 0f) {
+                                val stroke = Stroke(
+                                    sheetId = sheet,
                                     page = currentPage,
                                     points = encodePoints(
                                         pts.map { pxToNormalized(it, currentHitFit) }
@@ -320,12 +320,12 @@ internal fun Modifier.pageGestures(
                                     width = penWidthPxToFrac(currentPenWidth, currentHitFit),
                                     color = currentActiveColor
                                 )
-                                editor.addInk(currentPage, s, PageEdit(currentPageStamps, currentPageStrokes))
+                                editor.addInk(currentPage, stroke, PageEdit(currentPageStamps, currentPageStrokes))
                             }
                         } else if (eraserActive) {
                             val path = eraserPath
                             onInkPreview(emptyList())
-                            if (path.isNotEmpty() && currentHash != null && currentPageFit.width > 0f) {
+                            if (path.isNotEmpty() && currentSheetId != null && currentPageFit.width > 0f) {
                                 val radiusPx = currentEraserPx
                                 // the eraser always deletes what it grazes: to remove a whole
                                 // word, tap it (that selects it) and press the bin
@@ -417,7 +417,7 @@ internal fun Modifier.pageGestures(
                                 } else if (!currentStampArmed) {
                                     // no tool: just deselect
                                     editor.clearSelection()
-                                } else if (currentHash != null &&
+                                } else if (currentSheetId != null &&
                                     (aimed || totalPan.getDistance() <= touchSlopPx)
                                 ) {
                                     // a drag is a pan and must not drop a stamp; the loupe is
