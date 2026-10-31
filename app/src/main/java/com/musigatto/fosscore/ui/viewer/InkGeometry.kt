@@ -34,8 +34,8 @@ const val MIN_ERASER_PX = 6f
 const val MAX_ERASER_PX = 60f
 const val DEFAULT_ERASER_PX = 16f
 
-// A word: the strokes that were written as one unit. Grouping is geometric, so it survives
-// reopening the score, where the timing between strokes is long gone.
+// A word: the strokes that were written as one unit. An InkGroup is what the selection moves and
+// deletes; its identity comes from the strokes' groupId, decided when they were written.
 data class InkGroup(val bounds: RectPx, val strokes: List<Stroke>)
 
 // Same word if the boxes are close: dx leaves room for the gap between letters, dy is tighter so
@@ -45,6 +45,11 @@ data class InkGroup(val bounds: RectPx, val strokes: List<Stroke>)
 // split each line at its largest gap (ICPR gap clustering) or select with a lasso.
 const val WORD_GAP_X_FRAC = 0.6f
 const val WORD_GAP_Y_FRAC = 0.35f
+
+// A stroke written this soon after the one before, and right next to it, is the next letter of the
+// same word. Calibration: ~2 s is a slow letter, and two separate marks usually take longer.
+// ponytail: one number for every hand; raise it if a slow writer's words keep splitting.
+const val WORD_GAP_MS = 2_000L
 
 /** The stroke's points in px at this fit. */
 fun strokePointsPx(st: Stroke, fit: RectPx): List<Offset> =
@@ -66,8 +71,10 @@ fun deltaInside(points: List<Offset>, d: Offset): Offset {
 }
 
 // box a set of strokes covers, the same one a single stroke gets
-private fun boxesOf(strokes: List<Stroke>, fit: RectPx): List<RectPx> =
-    strokes.map { strokeSelectionRect(strokePointsPx(it, fit), it.width * fit.height) }
+private fun boxOf(stroke: Stroke, fit: RectPx): RectPx =
+    strokeSelectionRect(strokePointsPx(stroke, fit), stroke.width * fit.height)
+
+private fun boxesOf(strokes: List<Stroke>, fit: RectPx): List<RectPx> = strokes.map { boxOf(it, fit) }
 
 private fun union(boxes: List<RectPx>) = RectPx(
     boxes.minOf { it.left },
@@ -80,9 +87,40 @@ private fun gapX(a: RectPx, b: RectPx) = max(0f, max(b.left - a.right, a.left - 
 private fun gapY(a: RectPx, b: RectPx) = max(0f, max(b.top - a.bottom, a.top - b.bottom))
 
 /**
- * Strokes of the page grouped into words by the gap between their boxes (the bounding-box metric of
- * the handwriting-segmentation literature). Union-find over the pairs, thresholded by the median
- * stroke height so it follows the size the user writes at.
+ * The word a stroke written at [now] joins: the group of [previous] (the last stroke of the page)
+ * when it was written [WORD_GAP_MS] ago or less and the new stroke lands within the same gaps
+ * [groupInk] uses, or [nextGroup] for a new word.
+ *
+ * Deciding this once, when the stroke is written, is what stops two words from merging when one is
+ * dragged next to the other afterwards: the group is a value in the row, not a distance measured
+ * again at every touch.
+ *
+ * Ink from before v5 has no group (`groupId == 0`) and is still grouped by distance, so it cannot
+ * adopt a letter written next to it; that ink keeps the behaviour it had.
+ */
+fun groupForStroke(
+    previous: Stroke?,
+    writtenAt: Long,
+    now: Long,
+    nextGroup: Long,
+    stroke: Stroke,
+    fit: RectPx,
+): Long {
+    if (previous == null || previous.groupId == 0L) return nextGroup
+    if (now - writtenAt > WORD_GAP_MS) return nextGroup
+    val a = boxOf(previous, fit)
+    val b = boxOf(stroke, fit)
+    val h = max(a.height, b.height).coerceAtLeast(1f)
+    val close = gapX(a, b) <= WORD_GAP_X_FRAC * h && gapY(a, b) <= WORD_GAP_Y_FRAC * h
+    return if (close) previous.groupId else nextGroup
+}
+
+/**
+ * Strokes of the page grouped into words. A stroke written since v5 carries the word it was
+ * written as ([Stroke.groupId]) and only joins the strokes that share it. Ink from before has no
+ * group and is grouped by the gap between its boxes (the bounding-box metric of the
+ * handwriting-segmentation literature), union-find over the pairs, thresholded by the median stroke
+ * height so it follows the size the user writes at.
  *
  * ponytail: O(n²) over the page's strokes; a page holds a few hundred, and the result is cached by
  * the caller. Upgrade only if a page with thousands of strokes ever lags.
@@ -104,7 +142,15 @@ fun groupInk(strokes: List<Stroke>, fit: RectPx): List<InkGroup> {
     }
     for (i in strokes.indices) {
         for (j in i + 1 until strokes.size) {
-            if (gapX(boxes[i], boxes[j]) <= gx && gapY(boxes[i], boxes[j]) <= gy) {
+            val gi = strokes[i].groupId
+            val gj = strokes[j].groupId
+            val together = if (gi != 0L || gj != 0L) {
+                // a word is what was written as one: no distance joins two of them
+                gi != 0L && gi == gj
+            } else {
+                gapX(boxes[i], boxes[j]) <= gx && gapY(boxes[i], boxes[j]) <= gy
+            }
+            if (together) {
                 val a = root(i)
                 val b = root(j)
                 if (a != b) parent[a] = b

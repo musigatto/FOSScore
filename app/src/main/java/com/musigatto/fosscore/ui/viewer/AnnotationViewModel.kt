@@ -74,6 +74,13 @@ internal class AnnotationViewModel(
     // --- the pen-picked-up state of every page touched, for ✕ (issue #50) ---
     private val session = AnnotationSession()
 
+    /**
+     * When the last stroke was finished. The next one, written a moment later and next to it, is
+     * the next letter of the same word (see [groupForStroke]); the gesture reads it and [addInk]
+     * sets it.
+     */
+    var lastInkAt = 0L
+
     val canUndo: Boolean get() = undoStack.isNotEmpty()
     val canRedo: Boolean get() = redoStack.isNotEmpty()
 
@@ -218,6 +225,7 @@ internal class AnnotationViewModel(
     /** A finished stroke: kept on screen until the DB hands it back with its id. */
     fun addInk(page: Int, stroke: Stroke, current: PageEdit) {
         pushUndo(current, page)
+        lastInkAt = System.currentTimeMillis()
         viewModelScope.launch {
             val stored = stroke.copy(id = strokes.insert(stroke))
             pendingInk = pendingInk + stored

@@ -17,9 +17,9 @@ class InkGeometryTest {
     fun samplePointsDropsConsecutiveClosePoints() {
         val pts = listOf(Offset(0f, 0f), Offset(1f, 0f), Offset(1.5f, 0f), Offset(10f, 0f))
         val out = samplePoints(pts, 2f)
-        // se mide contra el ├ÜLTIMO punto conservado: (1,0) y (1.5,0) est├ín a <2 del (0,0),
-        // as├¡ que solo entra el (10,0). La expectativa original (conservar el 1.5) contradec├¡a
-        // la implementaci├│n y fallaba siempre (definici├│n en InkGeometry: minDist del anterior).
+        // se mide contra el ÚLTIMO punto conservado: (1,0) y (1.5,0) están a <2 del (0,0),
+        // así que solo entra el (10,0). La expectativa original (conservar el 1.5) contradecía
+        // la implementación y fallaba siempre (definición en InkGeometry: minDist del anterior).
         assertEquals(listOf(Offset(0f, 0f), Offset(10f, 0f)), out)
     }
 
@@ -44,9 +44,9 @@ class InkGeometryTest {
     @Test
     fun penWidthPxRoundTripsAndClampsToPageRange() {        val fit = RectPx(0f, 0f, 750f, 1000f)
         assertEquals(DEFAULT_PEN_PX, penWidthPxToFrac(DEFAULT_PEN_PX, fit) * fit.height, 1e-4f)
-        // p├ígina baja: manda el tope de fracci├│n (2% del alto)
+        // página baja: manda el tope de fracción (2% del alto)
         assertEquals(MAX_STROKE_WIDTH, penWidthPxToFrac(MAX_PEN_PX, RectPx(0f, 0f, 100f, 300f)), 1e-6f)
-        // alto 0 (a├║n sin maquetar): el guard evita NaN/Inf y deja el valor en rango
+        // alto 0 (aún sin maquetar): el guard evita NaN/Inf y deja el valor en rango
         val degenerate = penWidthPxToFrac(MIN_PEN_PX, RectPx(0f, 0f, 0f, 0f))
         assertTrue(degenerate.isFinite() && degenerate in MIN_STROKE_WIDTH..MAX_STROKE_WIDTH)
     }
@@ -99,7 +99,7 @@ class InkGeometryTest {
     }
 
     // letter at x..x+40, y..y+40 in px at a 1000 px fit (the entity stores normalized points)
-    private fun letter(id: Long, x: Float, y: Float = 0f) = Stroke(
+    private fun letter(id: Long, x: Float, y: Float = 0f, groupId: Long = 0L) = Stroke(
         id = id,
         sheetId = 1,
         page = 0,
@@ -107,8 +107,68 @@ class InkGeometryTest {
             listOf(Offset(x, y), Offset(x, y + 40f), Offset(x + 40f, y))
                 .map { Offset(it.x / 1000f, it.y / 1000f) }
         ),
-        width = 0.002f
+        width = 0.002f,
+        groupId = groupId
     )
+
+    /** Writes letters at [xs], [gapMs] apart, grouping each one as the gesture does. */
+    private fun write(
+        fit: RectPx,
+        vararg xs: Float,
+        gapMs: Long = 300,
+        pauseAfter: Int = -1,
+        pauseMs: Long = 3_000,
+    ): List<Stroke> {
+        val strokes = mutableListOf<Stroke>()
+        var at = 1_000L
+        var prevAt = at
+        xs.forEachIndexed { i, x ->
+            if (i > 0) at += if (i == pauseAfter + 1) pauseMs else gapMs
+            val stroke = letter(i + 1L, x)
+            val group = groupForStroke(
+                previous = strokes.lastOrNull(),
+                writtenAt = prevAt,
+                now = at,
+                nextGroup = (strokes.maxOfOrNull { it.groupId } ?: 0L) + 1L,
+                stroke = stroke,
+                fit = fit
+            )
+            strokes += stroke.copy(groupId = group)
+            prevAt = at
+        }
+        return strokes
+    }
+
+    @Test
+    fun aWordWrittenInOneGoIsOneGroup() {
+        val fit = RectPx(0f, 0f, 1000f, 1000f)
+        val strokes = write(fit, 0f, 50f, 100f, 150f)
+        assertEquals(setOf(1L), strokes.map { it.groupId }.toSet())
+        assertEquals(1, groupInk(strokes, fit).size)
+    }
+
+    @Test
+    fun aLetterWrittenMuchLaterStartsANewGroup() {
+        val fit = RectPx(0f, 0f, 1000f, 1000f)
+        // "ho" then a 3 s pause before the next letter, right next to it: a pause means a new word
+        val strokes = write(fit, 0f, 50f, 100f, pauseAfter = 1)
+        assertEquals(listOf(1L, 1L, 2L), strokes.map { it.groupId })
+        assertEquals(2, groupInk(strokes, fit).size)
+    }
+
+    @Test
+    fun movingAWordNextToAnotherKeepsThemApart() {
+        val fit = RectPx(0f, 0f, 1000f, 1000f)
+        // written in two places, then one dragged right next to the other: close enough to merge
+        // by distance, but each word keeps the group it was written with
+        val strokes = listOf(
+            letter(1, 0f, groupId = 1L), letter(2, 50f, groupId = 1L),
+            letter(3, 100f, groupId = 2L), letter(4, 150f, groupId = 2L)
+        )
+        val groups = groupInk(strokes, fit)
+        assertEquals(2, groups.size)
+        assertEquals(listOf(setOf(1L, 2L), setOf(3L, 4L)), groups.map { g -> g.strokes.map { it.id }.toSet() })
+    }
 
     @Test
     fun strokesOfAWordEndUpInOneGroup() {

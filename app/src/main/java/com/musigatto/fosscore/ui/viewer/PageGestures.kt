@@ -320,7 +320,21 @@ internal fun Modifier.pageGestures(
                                     width = penWidthPxToFrac(currentPenWidth, currentHitFit),
                                     color = currentActiveColor
                                 )
-                                editor.addInk(currentPage, stroke, PageEdit(currentPageStamps, currentPageStrokes))
+                                // the word the stroke belongs to is decided now, once: the next
+                                // letter of what was just written joins it, anything else starts
+                                // a new one. Dragging one word next to another later must not
+                                // merge them, so the distance is not consulted again at selection.
+                                val grouped = stroke.copy(
+                                    groupId = groupForStroke(
+                                        previous = currentInkStrokes.maxByOrNull { it.id },
+                                        writtenAt = editor.lastInkAt,
+                                        now = System.currentTimeMillis(),
+                                        nextGroup = (currentInkStrokes.maxOfOrNull { it.groupId } ?: 0L) + 1L,
+                                        stroke = stroke,
+                                        fit = currentHitFit,
+                                    )
+                                )
+                                editor.addInk(currentPage, grouped, PageEdit(currentPageStamps, currentPageStrokes))
                             }
                         } else if (eraserActive) {
                             val path = eraserPath
