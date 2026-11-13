@@ -55,3 +55,10 @@ fun <T> alphabetIndex(items: List<T>, collator: Collator = nameCollator(), name:
 /** Names sorted as a reader expects: case is ignored, and "écho" sorts next to "Echo", not after "Z". */
 fun nameCollator(): Collator = Collator.getInstance().apply { strength = Collator.SECONDARY }
 
+
+/**
+ * [items] in the order an IndexedList shows them: "#" first, then letter by letter, by name in
+ * each. A tag's scores play in this order, so the next score is the one under it on screen.
+ */
+fun <T> alphabetical(items: List<T>, collator: Collator = nameCollator(), name: (T) -> String): List<T> =
+    alphabetIndex(items, collator, name).rows.mapNotNull { (it as? IndexedRow.Item<T>)?.item }

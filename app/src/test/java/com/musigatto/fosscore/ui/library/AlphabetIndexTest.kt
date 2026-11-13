@@ -46,4 +46,13 @@ class AlphabetIndexTest {
         val index = alphabetIndex(listOf("Lucie", "Lucie"), collator) { it }
         assertEquals(3, index.rows.size)
     }
+
+    @Test
+    fun aTagsScoresPlayInTheOrderTheyAreShown() {
+        // by letter, "#" first, and "écho" under E (a plain sort by text would put it after "Z")
+        assertEquals(
+            listOf("1789", "Au clair de la lune", "écho", "Zoé"),
+            alphabetical(listOf("Zoé", "écho", "1789", "Au clair de la lune"), collator) { it },
+        )
+    }
 }

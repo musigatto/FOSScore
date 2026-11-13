@@ -1,5 +1,6 @@
 package com.musigatto.fosscore.library
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -14,9 +15,9 @@ import com.musigatto.fosscore.score.SheetFormat
  * whether the same file came back, but it changes when the file changes (re-exported, optimised,
  * one page more), so nothing points at it.
  *
- * The text columns (composer, genre, musicalKey, tags) are the v4 values, still written and read
- * by the library screen. The tables below are filled on import: the text goes in v6, once the new
- * ones are checked. See docs/feature-roadmap.md §3.8.
+ * The text columns genre and musicalKey are the v4 values, still written and read by the library
+ * screen. composer and tags are empty from v10: the people ([SheetPerson]) and the tags
+ * ([SheetTag]) are in their tables. See docs/feature-roadmap.md §3.8.
  */
 @Entity(tableName = "sheets", indices = [Index("hash", unique = true)])
 data class Sheet(
@@ -43,6 +44,9 @@ data class Sheet(
     val openCount: Int? = null,
     /** When the score entered the library. */
     val addedAt: Long? = null,
+    /** The user's own words on the score, free text (v10). */
+    @ColumnInfo(defaultValue = "")
+    val comment: String = "",
 )
 
 /**
@@ -69,7 +73,7 @@ data class Person(
     val sortName: String,
 )
 
-/** What [personId] did on [sheetId]: composer, lyricist, arranger, performer. */
+/** What [personId] did on [sheetId]: [role] is a [PersonRole] name. */
 @Entity(
     tableName = "sheet_people",
     primaryKeys = ["sheetId", "personId", "role"],
@@ -85,15 +89,27 @@ data class SheetPerson(
     val role: String,
 )
 
+/**
+ * What a person did on a score. The author of the words and the composer of the music share one
+ * role: the score's details have one field for both.
+ */
+enum class PersonRole { COMPOSER, PERFORMER }
+
 /** A genre is a tag too: one mechanism, and the genre filter is [kind]. */
 enum class TagKind { GENRE, FREE }
 
-@Entity(tableName = "tags", indices = [Index("name", unique = true)])
+/**
+ * A tag or a genre ([kind]). A name is unique within its kind (v10): the genre "Pop" and a tag "Pop"
+ * are two rows. [code] is the [Genre] a default genre is, shown in the app's language; null for
+ * every name the user wrote.
+ */
+@Entity(tableName = "tags", indices = [Index(value = ["kind", "name"], unique = true)])
 data class Tag(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val color: Int? = null,
     val kind: TagKind = TagKind.FREE,
+    val code: String? = null,
 )
 
 @Entity(

@@ -2,34 +2,36 @@ package com.musigatto.fosscore.library
 
 import android.content.Context
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 
 /** The setlists of the library: named, ordered lists of its scores. */
-class SetlistRepository(context: Context) {
+class SetlistRepository(context: Context) : ScoreGroups {
     private val dao = AppDatabase.get(context.applicationContext).setlistDao()
 
-    fun setlists(): Flow<List<SetlistSummary>> = dao.observeSummaries()
+    override val ordered = true
 
-    fun setlist(id: Long): Flow<Setlist?> = dao.observe(id)
+    override fun groups(): Flow<List<GroupSummary>> = dao.observeSummaries()
 
-    fun entries(setlistId: Long): Flow<List<SetlistEntry>> = dao.observeEntries(setlistId)
+    override fun name(id: Long): Flow<String?> = dao.observe(id).map { it?.name }
 
-    suspend fun create(name: String): Long = dao.insert(Setlist(name = name.trim(), createdAt = System.currentTimeMillis()))
+    override fun entries(id: Long): Flow<List<GroupEntry>> = dao.observeEntries(id)
 
-    suspend fun rename(id: Long, name: String) = dao.rename(id, name.trim())
+    override suspend fun create(name: String): Long = dao.insert(Setlist(name = name.trim(), createdAt = System.currentTimeMillis()))
 
-    suspend fun delete(id: Long) = dao.delete(id)
+    override suspend fun rename(id: Long, name: String) = dao.rename(id, name.trim())
 
-    suspend fun append(setlistId: Long, sheetId: Long) = dao.append(setlistId, sheetId)
+    override suspend fun delete(id: Long) = dao.delete(id)
 
-    suspend fun remove(itemId: Long) = dao.removeItem(itemId)
-
-    /** The places [itemIds] of a setlist, in this order (after a drag). */
-    suspend fun reorder(itemIds: List<Long>) = dao.reorder(itemIds)
-
-    /** Moves the place at [from] to [to] in [entries], the setlist as shown. */
-    suspend fun move(entries: List<SetlistEntry>, from: Int, to: Int) {
-        val ids = entries.map { it.itemId }
-        val order = ids.moved(from, to)
-        if (order !== ids) dao.reorder(order)
+    override suspend fun add(id: Long, sheetId: Long) {
+        dao.append(id, sheetId)
     }
+
+    // a setlist's entry is its place
+    override suspend fun remove(id: Long, entryKey: Long) = dao.removeItem(entryKey)
+
+    // two concerts may share a name
+    override suspend fun nameTaken(name: String, id: Long?): Boolean = false
+
+    /** The places [entryKeys] of a setlist, in this order (after a drag). */
+    override suspend fun reorder(entryKeys: List<Long>) = dao.reorder(entryKeys)
 }

@@ -23,6 +23,9 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun strokeDao(): StrokeDao
     abstract fun layerDao(): LayerDao
     abstract fun setlistDao(): SetlistDao
+    abstract fun tagDao(): TagDao
+    abstract fun personDao(): PersonDao
+    abstract fun keyDao(): KeyDao
 
     companion object {
         private val MIGRATION_1_2 = object : Migration(1, 2) {
@@ -259,16 +262,136 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v10: the tags live in their table, no longer in `sheets.tags`. Since v5 the table was a
+         * copy taken once, and the tag field went on writing the text: it is built again from the
+         * text, which is what every score shows today. A tag written on several scores, or spelled
+         * several ways ("Rock", "rock"), becomes one tag. The genre stays text for now: its rows,
+         * copied at v5 and never read, go, and come back when the genre gets its own field.
+         * The text column stays (dropping it rebuilds `sheets`), emptied.
+         */
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                // the user's own words on each score
+                db.execSQL("ALTER TABLE `sheets` ADD COLUMN `comment` TEXT NOT NULL DEFAULT ''")
+
+                val sheets = mutableListOf<Pair<Long, String>>()
+                db.query("SELECT `id`, `tags` FROM `sheets` ORDER BY `id`").use { c ->
+                    while (c.moveToNext()) sheets += c.getLong(0) to c.getString(1)
+                }
+                db.execSQL("DELETE FROM `sheet_tags`")
+                db.execSQL("DELETE FROM `tags`")
+                // a name is unique within its kind (the genre "Pop" beside a tag "Pop"), and a
+                // default genre knows which one it is, to be shown in the app's language
+                db.execSQL("DROP INDEX IF EXISTS `index_tags_name`")
+                db.execSQL("ALTER TABLE `tags` ADD COLUMN `code` TEXT")
+                db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS `index_tags_kind_name` ON `tags` (`kind`, `name`)")
+                val plan = NameBackfill.of(sheets, ::splitTagText)
+                plan.names.forEachIndexed { i, name ->
+                    db.execSQL(
+                        "INSERT INTO `tags` (`id`, `name`, `kind`) VALUES (?, ?, ?)",
+                        arrayOf<Any>(i + 1L, name, TagKind.FREE.name)
+                    )
+                }
+                for ((sheetId, index) in plan.links) {
+                    db.execSQL(
+                        "INSERT INTO `sheet_tags` (`sheetId`, `tagId`) VALUES (?, ?)",
+                        arrayOf<Any>(sheetId, index + 1L)
+                    )
+                }
+                db.execSQL("UPDATE `sheets` SET `tags` = ''")
+
+                // the composer text becomes people (empty until now), as authors/composers
+                val composers = mutableListOf<Pair<Long, String>>()
+                db.query("SELECT `id`, `composer` FROM `sheets` ORDER BY `id`").use { c ->
+                    while (c.moveToNext()) composers += c.getLong(0) to c.getString(1)
+                }
+                db.execSQL("DELETE FROM `sheet_people`")
+                db.execSQL("DELETE FROM `people`")
+                val people = NameBackfill.of(composers, ::splitPeopleText)
+                people.names.forEachIndexed { i, name ->
+                    db.execSQL(
+                        "INSERT INTO `people` (`id`, `name`, `sortName`) VALUES (?, ?, ?)",
+                        arrayOf<Any>(i + 1L, name, name)
+                    )
+                }
+                for ((sheetId, index) in people.links) {
+                    db.execSQL(
+                        "INSERT INTO `sheet_people` (`sheetId`, `personId`, `role`) VALUES (?, ?, ?)",
+                        arrayOf<Any>(sheetId, index + 1L, PersonRole.COMPOSER.name)
+                    )
+                }
+                db.execSQL("UPDATE `sheets` SET `composer` = ''")
+
+                // the genre text becomes genres: the defaults, each text recognised linked to its
+                // default, any other text a genre of its own
+                val genres = mutableListOf<Pair<Long, String>>()
+                db.query("SELECT `id`, `genre` FROM `sheets` ORDER BY `id`").use { c ->
+                    while (c.moveToNext()) genres += c.getLong(0) to c.getString(1)
+                }
+                val genrePlan = GenreBackfill.of(genres)
+                val firstGenre = plan.names.size + 1L
+                genrePlan.rows.forEachIndexed { i, row ->
+                    db.execSQL(
+                        "INSERT INTO `tags` (`id`, `name`, `kind`, `code`) VALUES (?, ?, ?, ?)",
+                        arrayOf(firstGenre + i, row.name, TagKind.GENRE.name, row.code)
+                    )
+                }
+                for ((sheetId, index) in genrePlan.links) {
+                    db.execSQL(
+                        "INSERT INTO `sheet_tags` (`sheetId`, `tagId`) VALUES (?, ?)",
+                        arrayOf<Any>(sheetId, firstGenre + index)
+                    )
+                }
+                db.execSQL("UPDATE `sheets` SET `genre` = ''")
+
+                // the key text becomes keys, in its order; a text naming no key goes to the
+                // comment, so that nothing is lost
+                val keyTexts = mutableListOf<Pair<Long, String>>()
+                db.query("SELECT `id`, `musicalKey` FROM `sheets` ORDER BY `id`").use { c ->
+                    while (c.moveToNext()) keyTexts += c.getLong(0) to c.getString(1)
+                }
+                db.execSQL("DELETE FROM `sheet_keys`")
+                for ((sheetId, text) in keyTexts) {
+                    val (keys, left) = splitKeyText(text)
+                    keys.forEachIndexed { position, key ->
+                        db.execSQL(
+                            "INSERT INTO `sheet_keys` (`sheetId`, `position`, `key`) VALUES (?, ?, ?)",
+                            arrayOf<Any>(sheetId, position, key.code)
+                        )
+                    }
+                    if (left.isNotEmpty()) {
+                        db.execSQL("UPDATE `sheets` SET `comment` = ? WHERE `id` = ?", arrayOf<Any>(KEY_LEFT_PREFIX + left, sheetId))
+                    }
+                }
+                db.execSQL("UPDATE `sheets` SET `musicalKey` = ''")
+            }
+        }
+
+        /** Before the part of an old key text that names no key, kept in the comment. */
+        const val KEY_LEFT_PREFIX = "Key: "
+
+        /** The default genres, in a library that has none of a code yet (a new one, or "restore"). */
+        fun insertDefaultGenres(db: SupportSQLiteDatabase) {
+            for (genre in Genre.entries) {
+                db.execSQL(
+                    "INSERT OR IGNORE INTO `tags` (`name`, `kind`, `code`) " +
+                        "SELECT ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM `tags` WHERE `code` = ?)",
+                    arrayOf<Any>(genre.english, TagKind.GENRE.name, genre.name, genre.name)
+                )
+            }
+        }
+
         const val NAME = "fosscore.db"
 
         /**
          * Schema version. When it changes: add the migration to [MIGRATIONS] (or an automatic
          * migration), commit the new file in `app/schemas/`, and extend `MigrationTest`.
          */
-        const val VERSION = 9
+        const val VERSION = 10
 
         /** Every migration, oldest first. A missing one stops the app instead of wiping the library. */
-        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+        val MIGRATIONS: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
 
         private var instance: AppDatabase? = null
 
@@ -283,6 +406,9 @@ abstract class AppDatabase : RoomDatabase() {
             Room.databaseBuilder(context, AppDatabase::class.java, NAME)
                 .addMigrations(*MIGRATIONS)
                 .addCallback(object : Callback() {
+                    // a new library starts with the default genres
+                    override fun onCreate(db: SupportSQLiteDatabase) = insertDefaultGenres(db)
+
                     // After the migrations: the imported sheets point to their PDFs on this device.
                     override fun onOpen(db: SupportSQLiteDatabase) = LibraryBackup.relinkIfNeeded(app, db)
                 })

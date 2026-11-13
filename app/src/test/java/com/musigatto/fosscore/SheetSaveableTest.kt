@@ -25,6 +25,7 @@ class SheetSaveableTest {
             durationS = 312.5,
             openedAt = 1_700_000_000_000L,
             openCount = 9,
+            comment = "Capo 2",
             addedAt = 1_600_000_000_000L
         )
 

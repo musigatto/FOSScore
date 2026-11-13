@@ -1,6 +1,5 @@
 package com.musigatto.fosscore.library
 
-import androidx.room.Embedded
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -32,18 +31,4 @@ data class SetlistItem(
     val setlistId: Long,
     val position: Int,
     val sheetId: Long,
-)
-
-/** A setlist as the list of setlists shows it: its name and how many places it has. */
-data class SetlistSummary(
-    val id: Long,
-    val name: String,
-    val size: Int,
-)
-
-/** A place of a setlist with its score, in the setlist's order. */
-data class SetlistEntry(
-    val itemId: Long,
-    val position: Int,
-    @Embedded val sheet: Sheet,
 )

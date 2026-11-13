@@ -23,6 +23,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
@@ -30,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.musigatto.fosscore.library.Credits
+import com.musigatto.fosscore.library.LibraryRepository
 import com.musigatto.fosscore.library.Sheet
 import com.musigatto.fosscore.score.SheetFormat
 import kotlinx.coroutines.launch
@@ -122,10 +125,11 @@ private val INDEX_WIDTH = 32.dp
 
 /**
  * A score as every list shows it: its title with its kind (PDF, MusicXML), so two copies of a
- * piece can be told apart, and its composer under it when there is one.
+ * piece can be told apart, and who it is by under it ("Composer · Performer") when known.
  */
 @Composable
 fun SheetText(sheet: Sheet, modifier: Modifier = Modifier, bold: Boolean = false) {
+    val credits = LocalSheetCredits.current[sheet.id]?.line.orEmpty()
     Column(modifier) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
@@ -139,11 +143,17 @@ fun SheetText(sheet: Sheet, modifier: Modifier = Modifier, bold: Boolean = false
             Spacer(Modifier.width(8.dp))
             FormatBadge(formatLabel(sheet.path))
         }
-        if (sheet.composer.isNotBlank()) {
-            Text(sheet.composer, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        if (credits.isNotBlank()) {
+            Text(credits, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
+
+/**
+ * Who each score is by, by score id ([LibraryRepository.creditsBySheet]), provided once at the top
+ * of the app: every list of scores shows it under the titles without asking for it.
+ */
+val LocalSheetCredits = compositionLocalOf<Map<Long, Credits>> { emptyMap() }
 
 /**
  * The kind of score, as the copy the importer keeps says ("PDF", "MusicXML"). Later the same

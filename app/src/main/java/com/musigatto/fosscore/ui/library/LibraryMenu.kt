@@ -39,6 +39,8 @@ import com.musigatto.fosscore.ui.viewer.LINE_PRACTICE
 import com.musigatto.fosscore.ui.viewer.LINE_SETLIST
 import com.musigatto.fosscore.ui.viewer.LINE_SETTINGS
 import com.musigatto.fosscore.ui.viewer.LINE_TAG
+import com.musigatto.fosscore.ui.viewer.LINE_PEOPLE
+import com.musigatto.fosscore.ui.viewer.LINE_GENRE
 import com.musigatto.fosscore.ui.viewer.LineIcon
 import kotlinx.coroutines.launch
 
@@ -97,7 +99,9 @@ fun LibraryMenuDrawer(
 enum class MenuView(@StringRes val label: Int, val icon: String, val ready: Boolean) {
     LIBRARY(R.string.library_title, LINE_LIBRARY, true),
     SETLISTS(R.string.library_menu_setlists, LINE_SETLIST, true),
-    TAGS(R.string.library_menu_tags, LINE_TAG, false),
+    TAGS(R.string.library_menu_tags, LINE_TAG, true),
+    PEOPLE(R.string.library_menu_people, LINE_PEOPLE, true),
+    GENRES(R.string.library_menu_genres, LINE_GENRE, true),
     PRACTICE(R.string.library_menu_practice, LINE_PRACTICE, false),
 }
 

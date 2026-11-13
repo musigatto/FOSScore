@@ -108,7 +108,10 @@ fun PreferencesScreen(onDone: () -> Unit) {
                             }
                             Section.KEYBOARD -> KeyboardSection()
                             Section.MIDI -> SoundBanks()
-                            Section.LIBRARY -> LibraryBackupSection()
+                            Section.LIBRARY -> {
+                                LibraryBackupSection()
+                                DefaultGenresRestore()
+                            }
                         }
                     }
                 }

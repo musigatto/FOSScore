@@ -134,7 +134,8 @@ class MigrationTest {
                 val sheet = db.sheetDao().byHash(HASH)
                 assertNotNull("v$version: sheet lost", sheet)
                 assertEquals("v$version", "Song", sheet!!.title)
-                assertEquals("v$version", "duo, practice", sheet.tags)
+                // v10: the tags left the text for their table (checked below)
+                assertEquals("v$version", "", sheet.tags)
                 // v5: the format stops being the extension
                 assertEquals("v$version", SheetFormat.PDF, sheet.format)
 
@@ -173,18 +174,135 @@ class MigrationTest {
                 // v8: a database created at v8 already has its setlists populated by fill()
                 assertEquals(
                     "v$version: setlists",
-                    if (version >= 8) listOf(SetlistSummary(1L, "Concert", 2)) else emptyList(),
+                    if (version >= 8) listOf(GroupSummary(1L, "Concert", 2)) else emptyList(),
                     db.setlistDao().observeSummaries().first()
                 )
 
-                // v5 (from an older version): the free text becomes tags, the genre as a genre
-                if (version >= 5) return@withRoom
+                // v10: the score's text "duo, practice" is its tags, whatever the table held
                 val tags = db.openHelper.readableDatabase
-                    .query("SELECT `name`, `kind` FROM `tags` ORDER BY `name`").use { c ->
-                        buildList { while (c.moveToNext()) add(c.getString(0) to c.getString(1)) }
+                    .query("SELECT `name` FROM `tags` WHERE `kind` = 'FREE' ORDER BY `name`").use { c ->
+                        buildList { while (c.moveToNext()) add(c.getString(0)) }
                     }
-                assertEquals("v$version: tags", listOf("Folk" to "GENRE", "duo" to "FREE", "practice" to "FREE"), tags)
+                assertEquals("v$version: tags", listOf("duo", "practice"), tags)
+                assertEquals("v$version: the score's tags", listOf("duo", "practice"), db.tagDao().tagsOf(sheet.id).map { it.name })
+
+                // v10: the 15 default genres; the text "Folk" is the default "Folk & country"
+                assertEquals("v$version: genres", Genre.entries.map { it.name }, db.tagDao().genres().mapNotNull { it.code }.sortedBy { Genre.valueOf(it).ordinal })
+                assertEquals("v$version: the score's genre", listOf(Genre.FOLK_COUNTRY.name), db.tagDao().genresOf(sheet.id).map { it.code })
+                assertEquals("v$version: genre text", "", sheet.genre)
+                // v10: the key text "F" is the key F
+                assertEquals("v$version: keys", listOf("F"), db.keyDao().keysOf(sheet.id).map { it.key })
+                assertEquals("v$version: key text", "", sheet.musicalKey)
+
+                // v10: the composer text is a person, as author/composer; the text is emptied
+                assertEquals("v$version: people", listOf("Composer"), db.personDao().all().map { it.name })
+                assertEquals(
+                    "v$version: the score's composers",
+                    listOf("Composer"),
+                    db.personDao().peopleOf(sheet.id, PersonRole.COMPOSER.name).map { it.name },
+                )
+                assertEquals("v$version: composer text", "", sheet.composer)
+                // v10: a comment, empty for every score that came before it
+                assertEquals("v$version: comment", "", sheet.comment)
             }
+        }
+    }
+
+    @Test
+    fun aGenreOrAKeyTextNotRecognisedIsKept() {
+        context.deleteDatabase(testDb)
+        helper.createDatabase(testDb, 8).apply {
+            for ((id, genreAndKey) in listOf(1L to ("Bal musette, Rock" to "Do M, coucou"), 2L to ("bal musette" to "F#m / Bb"))) {
+                insert("sheets", SQLiteDatabase.CONFLICT_ABORT, ContentValues().apply {
+                    put("id", id)
+                    put("fileName", "song$id.pdf")
+                    put("path", "/data/sheets/song$id.pdf")
+                    put("hash", "hash$id")
+                    put("title", "Song $id")
+                    put("composer", "")
+                    put("format", "PDF")
+                    put("genre", genreAndKey.first)
+                    put("musicalKey", genreAndKey.second)
+                    put("tags", "")
+                })
+            }
+            close()
+        }
+        helper.runMigrationsAndValidate(testDb, 10, true, *AppDatabase.MIGRATIONS).close()
+        withRoom { db ->
+            // "Bal musette" is a genre of its own, once; "Rock" the default
+            val own = db.tagDao().genres().filter { it.code == null }.map { it.name }
+            assertEquals(listOf("Bal musette"), own)
+            assertEquals(listOf(null, Genre.ROCK_METAL.name), db.tagDao().genresOf(1L).map { it.code }.sortedBy { it ?: "" })
+            assertEquals(listOf("Bal musette"), db.tagDao().genresOf(2L).map { it.name })
+            // the keys in their order; what names no key goes to the comment
+            assertEquals(listOf("C"), db.keyDao().keysOf(1L).map { it.key })
+            assertEquals(listOf("F#m", "Bb"), db.keyDao().keysOf(2L).map { it.key })
+            assertEquals("Key: coucou", db.sheetDao().byHash("hash1")?.comment)
+            assertEquals("", db.sheetDao().byHash("hash2")?.comment)
+        }
+    }
+
+    @Test
+    fun aComposerTextBecomesPeopleOncePerName() {
+        context.deleteDatabase(testDb)
+        helper.createDatabase(testDb, 8).apply {
+            for ((id, composer) in listOf(1L to "Léonard Cohen / Kyle Landry", 2L to "léonard cohen", 3L to "")) {
+                insert("sheets", SQLiteDatabase.CONFLICT_ABORT, ContentValues().apply {
+                    put("id", id)
+                    put("fileName", "song$id.pdf")
+                    put("path", "/data/sheets/song$id.pdf")
+                    put("hash", "hash$id")
+                    put("title", "Song $id")
+                    put("composer", composer)
+                    put("format", "PDF")
+                    put("genre", "")
+                    put("musicalKey", "")
+                    put("tags", "")
+                })
+            }
+            close()
+        }
+        helper.runMigrationsAndValidate(testDb, 10, true, *AppDatabase.MIGRATIONS).close()
+        withRoom { db ->
+            val composers = { id: Long -> runBlocking { db.personDao().peopleOf(id, PersonRole.COMPOSER.name).map { it.name } } }
+            // the first spelling met names the person
+            assertEquals(listOf("Kyle Landry", "Léonard Cohen"), db.personDao().all().map { it.name }.sorted())
+            assertEquals(listOf("Kyle Landry", "Léonard Cohen"), composers(1L))
+            assertEquals(listOf("Léonard Cohen"), composers(2L))
+            assertEquals(emptyList<String>(), composers(3L))
+            assertEquals(emptyList<String>(), db.personDao().peopleOf(1L, PersonRole.PERFORMER.name).map { it.name })
+        }
+    }
+
+    @Test
+    fun aTagWrittenOnSeveralScoresOrSeveralWaysBecomesOneTag() {
+        context.deleteDatabase(testDb)
+        helper.createDatabase(testDb, 8).apply {
+            for ((id, tags) in listOf(1L to "Rock duo", 2L to "rock", 3L to "", 4L to "film music, Rôck")) {
+                insert("sheets", SQLiteDatabase.CONFLICT_ABORT, ContentValues().apply {
+                    put("id", id)
+                    put("fileName", "song$id.pdf")
+                    put("path", "/data/sheets/song$id.pdf")
+                    put("hash", "hash$id")
+                    put("title", "Song $id")
+                    put("composer", "")
+                    put("format", "PDF")
+                    put("genre", "")
+                    put("musicalKey", "")
+                    put("tags", tags)
+                })
+            }
+            close()
+        }
+        helper.runMigrationsAndValidate(testDb, 10, true, *AppDatabase.MIGRATIONS).close()
+        withRoom { db ->
+            // the first spelling met names the tag: "Rock" (score 1), not "rock" or "Rôck"
+            assertEquals(listOf("Rock", "duo", "film music"), db.tagDao().free().map { it.name }.sorted())
+            assertEquals(listOf("duo", "Rock"), db.tagDao().tagsOf(1L).map { it.name })
+            assertEquals(listOf("Rock"), db.tagDao().tagsOf(2L).map { it.name })
+            assertEquals(emptyList<String>(), db.tagDao().tagsOf(3L).map { it.name })
+            assertEquals(listOf("film music", "Rock"), db.tagDao().tagsOf(4L).map { it.name })
         }
     }
 
@@ -208,7 +326,7 @@ class MigrationTest {
                 listOf(Layer(1L, 1L, "", true)),
                 db.layerDao().observe(1L).first(),
             )
-            assertEquals(listOf(SetlistSummary(1L, "Concert", 2)), db.setlistDao().observeSummaries().first())
+            assertEquals(listOf(GroupSummary(1L, "Concert", 2)), db.setlistDao().observeSummaries().first())
             assertEquals(listOf(1L, 1L), db.setlistDao().observeEntries(1L).first().map { it.sheet.id })
         }
     }

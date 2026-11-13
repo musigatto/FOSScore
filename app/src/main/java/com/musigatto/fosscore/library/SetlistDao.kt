@@ -13,17 +13,17 @@ abstract class SetlistDao {
             "LEFT JOIN setlist_items i ON i.setlistId = s.id " +
             "GROUP BY s.id ORDER BY s.name COLLATE NOCASE ASC, s.id ASC"
     )
-    abstract fun observeSummaries(): Flow<List<SetlistSummary>>
+    abstract fun observeSummaries(): Flow<List<GroupSummary>>
 
     @Query("SELECT * FROM setlists WHERE id = :id")
     abstract fun observe(id: Long): Flow<Setlist?>
 
     @Query(
-        "SELECT i.id AS itemId, i.position AS position, sh.* FROM setlist_items i " +
+        "SELECT i.id AS entryKey, sh.* FROM setlist_items i " +
             "JOIN sheets sh ON sh.id = i.sheetId " +
             "WHERE i.setlistId = :setlistId ORDER BY i.position ASC, i.id ASC"
     )
-    abstract fun observeEntries(setlistId: Long): Flow<List<SetlistEntry>>
+    abstract fun observeEntries(setlistId: Long): Flow<List<GroupEntry>>
 
     @Insert
     abstract suspend fun insert(setlist: Setlist): Long
